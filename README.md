@@ -9,5 +9,5 @@ OpenPose
 Apriltag
 
 ## References
-[1] OpenPose https://github.com/CMU-Perceptual-Computing-Lab/openpose
+[1] OpenPose https://github.com/CMU-Perceptual-Computing-Lab/openpose  
 [2] Graduate Non-Convexity from the work: Robust Event Detection based on Spatio-Temporal Latent Action Unit using Skeletal Information
