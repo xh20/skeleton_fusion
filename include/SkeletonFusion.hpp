@@ -8,7 +8,7 @@
 #endif //SKELETON_FUSION_SKELETON_FUSION_HPP
 
 #include <iostream>
-#include <Eigen/Dense>
+#include <eigen3/Eigen/Dense>
 
 #include <openpose/headers.hpp>
 #include <openpose/flags.hpp>
@@ -32,8 +32,8 @@ private:
 public:
     OpWrapper();
     virtual ~OpWrapper();
-    bool run(Mat& frame, const Mat& frameD, const double& fx, const double& fy,
-                     const double& cx, const double& cy, const bool& noDisplay);
+    void run(Mat* frame, const Mat* frameD, const double* fx, const double* fy,
+             const double* cx, const double* cy, const bool* noDisplay, MatrixXd*, VectorXd*);
     tuple<MatrixXd, VectorXd> getSkeleton();
 };
 
@@ -97,16 +97,24 @@ inline void OpWrapper::configureWrapper()
         const auto handDetector = op::flagsToDetector(FLAGS_hand_detector);
         // Enabling Google Logging
         const bool enableGoogleLogging = true;
-
+        const string modelFolder = "/home/geriatronics/openpose/models";
         // Pose configuration (use WrapperStructPose{} for default and recommended configuration)
         const op::WrapperStructPose wrapperStructPose{
-                poseMode, netInputSize, outputSize, keypointScaleMode, FLAGS_num_gpu, FLAGS_num_gpu_start,
-                FLAGS_scale_number, (float)FLAGS_scale_gap, op::flagsToRenderMode(FLAGS_render_pose, multipleView),
-                poseModel, !FLAGS_disable_blending, (float)FLAGS_alpha_pose, (float)FLAGS_alpha_heatmap,
-                FLAGS_part_to_show, op::String(FLAGS_model_folder), heatMapTypes, heatMapScaleMode, FLAGS_part_candidates,
-                (float)FLAGS_render_threshold, FLAGS_number_people_max, FLAGS_maximize_positives, FLAGS_fps_max,
-                op::String(FLAGS_prototxt_path), op::String(FLAGS_caffemodel_path),
-                (float)FLAGS_upsampling_ratio, enableGoogleLogging};
+                poseMode, netInputSize, FLAGS_net_resolution_dynamic, outputSize, keypointScaleMode, FLAGS_num_gpu,
+                FLAGS_num_gpu_start, FLAGS_scale_number, (float)FLAGS_scale_gap,
+                op::flagsToRenderMode(FLAGS_render_pose, multipleView), poseModel, !FLAGS_disable_blending,
+                (float)FLAGS_alpha_pose, (float)FLAGS_alpha_heatmap, FLAGS_part_to_show, op::String(modelFolder),
+                heatMapTypes, heatMapScaleMode, FLAGS_part_candidates, (float)FLAGS_render_threshold,
+                FLAGS_number_people_max, FLAGS_maximize_positives, FLAGS_fps_max, op::String(FLAGS_prototxt_path),
+                op::String(FLAGS_caffemodel_path), (float)FLAGS_upsampling_ratio, enableGoogleLogging};
+//        const op::WrapperStructPose wrapperStructPose{
+//                poseMode, netInputSize, outputSize, keypointScaleMode, FLAGS_num_gpu, FLAGS_num_gpu_start,
+//                FLAGS_scale_number, (float)FLAGS_scale_gap, op::flagsToRenderMode(FLAGS_render_pose, multipleView),
+//                poseModel, !FLAGS_disable_blending, (float)FLAGS_alpha_pose, (float)FLAGS_alpha_heatmap,
+//                FLAGS_part_to_show, op::String(FLAGS_model_folder), heatMapTypes, heatMapScaleMode, FLAGS_part_candidates,
+//                (float)FLAGS_render_threshold, FLAGS_number_people_max, FLAGS_maximize_positives, FLAGS_fps_max,
+//                op::String(FLAGS_prototxt_path), op::String(FLAGS_caffemodel_path),
+//                (float)FLAGS_upsampling_ratio, enableGoogleLogging};
         opWrapper.configure(wrapperStructPose);
         // Face configuration (use op::WrapperStructFace{} to disable it)
         const op::WrapperStructFace wrapperStructFace{
@@ -145,15 +153,18 @@ inline void OpWrapper::configureWrapper()
     }
 }
 
-inline bool OpWrapper::run(Mat& frame, const Mat& frameD, const double& fx, const double& fy,
-        const double& cx, const double& cy, const bool& noDisplay) {
-    const op::Matrix imageToProcess = OP_CV2OPCONSTMAT(frame); //OP_CV2OPCONSTMAT
+inline void OpWrapper::run(Mat* frame, const Mat* frameD, const double* fx, const double* fy,
+        const double* cx, const double* cy, const bool* noDisplay, MatrixXd *sk, VectorXd * acc) {
+    const op::Matrix imageToProcess = OP_CV2OPCONSTMAT(*frame); //OP_CV2OPCONSTMAT
     datumProcessed = opWrapper.emplaceAndPop(imageToProcess);
     if (datumProcessed != nullptr)
     {
-        frame = OP_OP2CVCONSTMAT(datumProcessed->at(0)->cvOutputData);
-        processKeypoints(frameD, fx, fy, cx, cy);
+//        frame = OP_OP2CVCONSTMAT(datumProcessed->at(0)->cvOutputData);
+        processKeypoints(*frameD, *fx, *fy, *cx, *cy);
+        *sk = skeleton;
+        *acc = confidence;
         if (!noDisplay)
+//        if (true)
         {
             const auto userWantsToExit = display();
             if (userWantsToExit)
@@ -162,11 +173,9 @@ inline bool OpWrapper::run(Mat& frame, const Mat& frameD, const double& fx, cons
                 exit(1);
             }
         }
-        return true;
     }
     else{
         op::opLog("Video could not be processed.", op::Priority::High);
-        return false;
     }
 }
 

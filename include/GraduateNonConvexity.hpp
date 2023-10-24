@@ -6,7 +6,7 @@
 #define SKELETON_FUSION_GRADUATENONCONVEXITY_HPP
 
 #endif //SKELETON_FUSION_GRADUATENONCONVEXITY_HPP
-#include <Eigen/Dense>
+#include <eigen3/Eigen/Dense>
 #include <cmath>
 #include <matplotlibcpp.h>
 

@@ -9,7 +9,7 @@
 
 #include "opencv2/opencv.hpp"
 #include <iostream>
-#include <Eigen/Dense>
+#include <eigen3/Eigen/Dense>
 //extern "C" {
 #include "apriltag/apriltag.h"
 #include "apriltag/tag36h11.h"
@@ -21,6 +21,8 @@
 //}
 
 using namespace Eigen;
+using namespace std;
+using namespace cv;
 
 class TagDetector{
 
@@ -45,7 +47,7 @@ public:
     void setCamInfo(const double& tagsize, const double& fx, const double& fy,
             const double& cx, const double& cy);
     void setTagCode(const string& s);
-    bool isDetected(const int& detectionID, const Mat& img);
+    void isDetected(const int* detectionID, const Mat* img, bool*);
     tuple<Matrix3d, Vector3d> getTagPose();
     void cleanUp() const;
     Vector3d getTagToCam(Mat& depthImg);
@@ -99,24 +101,22 @@ inline tuple<Matrix3d, Vector3d> TagDetector::pose2Matrix(const apriltag_pose_t*
     return make_tuple(R,T);
 }
 
-inline bool TagDetector::isDetected(const int& detectionID, const Mat& matImg) {
-    bool isTagdetected = false;
-    ID = detectionID;
+inline void TagDetector::isDetected(const int* detectionID, const Mat* matImg, bool* isTagdetected) {
+    *isTagdetected = false;
+    ID = *detectionID;
     apriltag_detector_add_family(tagDetector, tagFamily);
-
     // convert image into grayscale, filter depth image
     Mat imgGray;
-    cvtColor(matImg, imgGray, CV_RGB2GRAY);
+    cvtColor(*matImg, imgGray, cv::COLOR_BGR2GRAY);
     image_u8_t img = { .width = imgGray.cols,
             .height = imgGray.rows,
             .stride = imgGray.cols,
             .buf = imgGray.data
     };
-
     detections = apriltag_detector_detect(tagDetector, &img);
 
     if (zarray_size(detections)==0){
-        return false;
+        *isTagdetected = false;
     }
     for (int i = 0; i < zarray_size(detections); i++) {
         apriltag_detection_t* detTemp;
@@ -125,18 +125,18 @@ inline bool TagDetector::isDetected(const int& detectionID, const Mat& matImg) {
         {
             continue;
         }
-        isTagdetected = true;
+        *isTagdetected = true;
         det = detTemp;
-        line(matImg, cv::Point(det->p[0][0], det->p[0][1]),
+        line(*matImg, cv::Point(det->p[0][0], det->p[0][1]),
              cv::Point(det->p[1][0], det->p[1][1]),
              Scalar(0, 0xff, 0), 2);
-        line(matImg, cv::Point(det->p[0][0], det->p[0][1]),
+        line(*matImg, cv::Point(det->p[0][0], det->p[0][1]),
              cv::Point(det->p[3][0], det->p[3][1]),
              Scalar(0, 0, 0xff), 2);
-        line(matImg, cv::Point(det->p[1][0], det->p[1][1]),
+        line(*matImg, cv::Point(det->p[1][0], det->p[1][1]),
              cv::Point(det->p[2][0], det->p[2][1]),
              Scalar(0xff, 0, 0), 2);
-        line(matImg, cv::Point(det->p[2][0], det->p[2][1]),
+        line(*matImg, cv::Point(det->p[2][0], det->p[2][1]),
              cv::Point(det->p[3][0], det->p[3][1]),
              Scalar(0xff, 0xff, 0), 2);
 
@@ -148,12 +148,11 @@ inline bool TagDetector::isDetected(const int& detectionID, const Mat& matImg) {
         string text = ss.str();
         Size textsize = getTextSize(text, fontface, fontscale, 2,
                                     &baseline);
-        putText(matImg, text, cv::Point(det->c[0]-double(textsize.width/2.0),
+        putText(*matImg, text, cv::Point(det->c[0]-double(textsize.width/2.0),
                                    det->c[1]+double(textsize.height/2.0)),
                 fontface, fontscale, Scalar(0xff, 0x99, 0), 2);
     }
-    cout <<"Is tag "<<ID<<" detected? "<<isTagdetected << endl;
-    return isTagdetected;
+    cout <<"Is tag "<<ID<<" detected? "<<*isTagdetected << endl;
 }
 
 inline Vector3d TagDetector::getTagToCam(Mat& depthImg){
