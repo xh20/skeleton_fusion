@@ -24,8 +24,8 @@ DEFINE_string(video1, "/media/dataset/translation/S00V00A16O00T1/colorframes/out
               "Give the first video file path");
 DEFINE_string(video2, "/media/dataset/translation/S00V01A16O00T1/colorframes/out.mp4",
               "Give the second video file path");
-DEFINE_bool(image, false, "is input as image");
-DEFINE_bool(demo, true, "is input as camera");
+DEFINE_bool(image, true, "is input as image");
+DEFINE_bool(demo, false, "is input as camera");
 DEFINE_bool(save_images, true, "save all images");
 
 
@@ -38,19 +38,19 @@ DEFINE_bool(save_images, true, "save all images");
 //              "Give the first video file path");
 //DEFINE_string(depthDir2, "/media/dataset/translation/results_medical2/845112070795/depth/",
 //              "Give the second video file path");
-DEFINE_string(colorDir1, "/media/dataset/HDTR_bagfile/results/cam1/color/",  // results_dailytask results_medical
+DEFINE_string(colorDir1, "/home/geriatronics/hao/skeleton_fusion/results/original1/",  // results_dailytask results_medical
               "Give the first video file path");
-DEFINE_string(colorDir2, "/media/dataset/HDTR_bagfile/results/cam2/color/", // results_test results_daily1
+DEFINE_string(colorDir2, "/home/geriatronics/hao/skeleton_fusion/results/original2/", // results_test results_daily1
               "Give the second video file path");
-DEFINE_string(depthDir1, "/media/dataset/HDTR_bagfile/results/cam1/depth/",
+DEFINE_string(depthDir1, "/home/geriatronics/hao/skeleton_fusion/results/depth1/",
               "Give the first video file path");
-DEFINE_string(depthDir2, "/media/dataset/HDTR_bagfile/results/cam2/depth/",
+DEFINE_string(depthDir2, "/home/geriatronics/hao/skeleton_fusion/results/depth2/",
               "Give the second video file path");
 
 
 DEFINE_string(tagCode, "36h11", "Give the tag code to choose tag family");
 DEFINE_int32(TagID, 89, "Give the Tag ID to calculate the extrinsic parameters, hand marker: 89, table left: 54, table right: 25");
-DEFINE_string(saveDir, "/home/geriatronics/hao/skeleton_fusion/results",
+DEFINE_string(saveDir, "/home/geriatronics/hao/skeleton_fusion/results/",
               "Give the save path");
 
 double standardRad(double t) {
@@ -315,16 +315,13 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
     }
 //    updateRT();
 
-    // Skeleton prediction
-    // from cam1
+    // 3D Skeleton prediction (Sk1, Sk2)
     bool noDisplay = true;
     thread t5(&OpWrapper::run, OW, &frame1, &frameD1, &fx1, &fy1, &cx1, &cy1, &noDisplay, &Sk1, &Acc1);
     thread t6(&OpWrapper::run, OW, &frame2, &frameD2, &fx2, &fy2, &cx2, &cy2, &noDisplay, &Sk2, &Acc2);
     t5.join();
     t6.join();
 
-//    tie(Sk1, Acc1) = OW->getSkeleton();
-//    tie(Sk2, Acc2) = OW->getSkeleton();
     if (Sk1.cols()==0 || Sk2.cols()==0){
         return;
     }
@@ -371,10 +368,11 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
     }
 
     // translate sk1 from cam1 to cam2
-
     Sk1Cam2 = R12*(Sk1.colwise() - T12);
 //    Sk1Cam2 = RHumanCam*(Sk1Cam2.colwise() - THumanCam);
 //    Sk2 = RHumanCam*(Sk2.colwise()-THumanCam);
+
+    // select target joints and plot test point on both frames
     for (int i=0; targetCount > i; i++) {
         // PTarget: P11, P21, P12, P22
         PTarget.middleCols(2*i,2) << Sk1Cam2.col(target[i+1]), Sk2.col(target[i+1]);
@@ -385,17 +383,16 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
         Vector3d pTestCam2 = K2*(Ptest/Ptest(2));
         MyFilledCircle(frame2, cv::Point(pTestCam2(0),pTestCam2(1)),Scalar( 0, 255, 0 ));
         Vector3d Ptest2 = Sk1.col(target[i+1]);
-        Vector3d pTest2Cam1 = K1*(Ptest2/Ptest2(2));
-        MyFilledCircle(frame1, cv::Point(pTest2Cam1(0),pTest2Cam1(1)),Scalar( 0, 255, 0 ));
-
+        Vector3d pTestCam1 = K1*(Ptest2/Ptest2(2));
+        MyFilledCircle(frame1, cv::Point(pTestCam1(0),pTestCam1(1)),Scalar( 0, 255, 0 ));
     }
 //    cout<<"Accuracy: \n"<<AccTarget<<endl;
-    cout<<"target joints: \n"<<PTarget<<endl;
-    cout<<"accuracy: \n"<<AccTarget<<endl;
+//    cout<<"target joints: \n"<<PTarget<<endl;
+//    cout<<"accuracy: \n"<<AccTarget<<endl;
     L12.push_back((PTarget.col(3) - PTarget.col(1)).norm());
     L23.push_back((PTarget.col(5) - PTarget.col(3)).norm());
-    cout<<"average measured length of elbow to wirst: "<<accumulate(L12.begin(),L12.end(),0.0)/L12.size()<<endl;
-    cout<<"average measured length of shoulder to elbow: "<<accumulate(L23.begin(),L23.end(),0.0)/L23.size()<<endl;
+//    cout<<"average measured length of elbow to wirst: "<<accumulate(L12.begin(),L12.end(),0.0)/L12.size()<<endl;
+//    cout<<"average measured length of shoulder to elbow: "<<accumulate(L23.begin(),L23.end(),0.0)/L23.size()<<endl;
     // GNC-MC
     // length: contrain; lambda: loose the contrain; stepSize: convergence
     GNC.setupGNC(PTarget, AccTarget, L1, Lambda1, stepSize, 3);
@@ -405,9 +402,9 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
 //    tie(P1, P2) = GNC.getTwoPointsEstimation();
     tie(P1, P2, P3) = GNC.getThreePointsEstimation();
 //    cout<<"target point: \n"<<PTarget<<endl;
-    cout<<"Estimated point 1: \n"<<P1<<endl;
-    cout<<"Estimated point 2: \n"<<P2<<endl;
-    cout<<"Estimated point 3: \n"<<P3<<endl;
+//    cout<<"Estimated point 1: \n"<<P1<<endl;
+//    cout<<"Estimated point 2: \n"<<P2<<endl;
+//    cout<<"Estimated point 3: \n"<<P3<<endl;
     // Visulization
     // P1 on cam 1
     PETranslated = (R12.transpose()*P1) + T12;
@@ -606,7 +603,7 @@ int main(int argc, char** argv){
         fs::create_directory(FLAGS_saveDir);
     }
 
-    predictionTxt.open(FLAGS_saveDir+"prediction.txt");
+    predictionTxt.open(fs::path(FLAGS_saveDir)/"prediction.txt");
     // Skeleton merger
     SkeletonMerger SM;
     TagDetector TD;
@@ -760,7 +757,7 @@ int main(int argc, char** argv){
             bool isTransformed = SM.isTransformed();
             double l1 = (P1-P2).norm();
             double l2 = (P2-P3).norm();
-            cout<<"predicted length1 : "<<l1<<" length2: "<< l2 <<endl;
+//            cout<<"predicted length1 : "<<l1<<" length2: "<< l2 <<endl;
             length1.push_back(l1);
 
 //            predictionTxt << P3(0) << " " << P3(1) << " " << P3(2)
@@ -822,16 +819,20 @@ int main(int argc, char** argv){
         }
         cout<<"frameNumber: "<<frameNumber<<endl;
         predictionTxt << frameNumber<<" " << target[0]*3 + 1 <<'\n';
-        std::sort(filenames.begin(), filenames.end(),
-                  [](const auto& lhs, const auto& rhs) {
-                      return lhs.string() < rhs.string();
-                  });
+        std::sort(filenames.begin(), filenames.end(), [](const auto& lhs, const auto& rhs)
+        {
+            string lhs_ = lhs.string();
+            string rhs_ = rhs.string();
+            string lhsn = lhs_.find("_")? lhs_.substr(lhs_.find("_")+1, lhs_.find(".")-lhs_.find("_")): lhs_;
+            string rhsn = rhs_.find("_")? rhs_.substr(rhs_.find("_")+1, rhs_.find(".")-rhs_.find("_")): rhs_;
+//            cout<< "filename: " << lhsn << " " << rhsn<<endl;
+            return stoi(lhsn) < stoi(rhsn);
+//            return lhs.string() < rhs.string();
+        });
         for (const auto& file : filenames) {
             string img = file.string();
-            string stamp = file.string().substr(4,7);
-            cout<<"stamp: "<< stamp <<endl;
             string imgD = img;
-            imgD.insert(3,"D");
+            imgD.replace(imgD.find("color"), sizeof("color") - 1, "depth");
             cout<<"img: "<<img<<endl;
             cout<<"imgD: "<<imgD<<endl;
             string imgDir1 = FLAGS_colorDir1 + img;
@@ -848,6 +849,11 @@ int main(int argc, char** argv){
                 break;
             bool skDetected = false;
             SM.processing(&frame1, &frame2, &frameD1, &frameD2, &skDetected);
+            Mat colorResult;
+            MyTextOnImage(frame1,"Camera 1: red (approximation)");
+            MyTextOnImage(frame2,"Camera 2");
+            hconcat(frame1, frame2, colorResult);
+            imshow("Two Color Cameras", colorResult);
             if(!skDetected)
                 continue;
             Vector3d P1, P2, P3;
@@ -856,36 +862,28 @@ int main(int argc, char** argv){
             bool isTransformed = SM.isTransformed();
             double l1 = (P1-P2).norm();
             double l2 = (P2-P3).norm();
-            cout<<"predicted length1 : "<<l1<<" length2: "<< l2 <<endl;
+//            cout<<"predicted length1 : "<<l1<<" length2: "<< l2 <<endl;
             length1.push_back(l1);
 
 //            predictionTxt << P3(0) << " " << P3(1) << " " << P3(2)
 //                          << " " << P2(0) << " " <<P2(1) << " " <<P2(2)
 //                          << " " << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
             if(isTransformed){
-
                 tie(RHumanCam, THumanCam) = SM.getHumanCamTF();
                 P3 = RHumanCam*(P3 - THumanCam);
                 P2 = RHumanCam*(P2 - THumanCam);
                 P1 = RHumanCam*(P1 - THumanCam);
 
-                predictionTxt<< stamp <<" "<< P3(0) << " " << P3(1) << " " << P3(2)
-                          << " " << P2(0) << " " <<P2(1) << " " <<P2(2)
-                          << " " << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
+//                predictionTxt<< stamp <<" "<< P3(0) << " " << P3(1) << " " << P3(2)
+//                          << " " << P2(0) << " " <<P2(1) << " " <<P2(2)
+//                          << " " << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
 //                predictionTxt << stamp << " " <<-P3(0) << " " << -P3(2) << " " << - P3(1)
 //                              << " " << -P2(0) << " " << -P2(2) << " " << - P2(1)
 //                              << " " << -P1(0)<< " " << -P1(2) << " " << -P1(1) <<'\n';
             }
-
-
-
-            MyTextOnImage(frame1,"Camera 1: red (approximation)");
-            MyTextOnImage(frame2,"Camera 2");
-            hconcat(frame1, frame2, result);
-            string saveDir = FLAGS_saveDir + "output_" + stamp + ".png";
-            cout<<"savedir: "<<saveDir<<endl;
-            imwrite(saveDir, result);
-            imshow("Left and right: Camera", result);
+//            string saveDir = FLAGS_saveDir + "output_" + stamp + ".png";
+//            cout<<"savedir: "<<saveDir<<endl;
+//            imwrite(saveDir, result);
             index ++;
             int key = waitKey(1); // key is an integer here
             if (key == 27)
@@ -893,15 +891,17 @@ int main(int argc, char** argv){
         }
     }
     predictionTxt.close();
-    if(!FLAGS_demo){
-        vector<double> constrain1 (frameNumber, constrainLength1);
-        plt::named_hist("Constrain length L_ew", constrain1);
-        plt::named_hist("Estimated length", length1);
-        plt::legend();
-        string imgDir = format("/media/dataset/translation/skeleton_fusion/results/cost/Length_over_time.png");
-        plt::save(imgDir);
-        plt::show();
-        plt::close();
-    }
+
+    // plot limb length over time
+//    if(!FLAGS_demo){
+//        vector<double> constrain1 (frameNumber, constrainLength1);
+//        plt::named_hist("Constrain length L_ew", constrain1);
+//        plt::named_hist("Estimated length", length1);
+//        plt::legend();
+//        string imgDir = format("/media/dataset/translation/skeleton_fusion/results/cost/Length_over_time.png");
+//        plt::save(imgDir);
+//        plt::show();
+//        plt::close();
+//    }
     return 0;
 }
