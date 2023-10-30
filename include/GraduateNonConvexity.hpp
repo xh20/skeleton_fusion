@@ -84,6 +84,9 @@ inline GraduateNonConvexity::~GraduateNonConvexity()= default;
 // Acc: accuracy 0: first joint at cam1; 1: first joint at cam2; 2: second joint at cam1; 3: second joint at cam2;
 inline void GraduateNonConvexity::setupGNC(const MatrixXd &PTarget, const VectorXd& Acc,
                                            const double& length, const double& Lambda, const double& stepSize, const int& pointsNumber) {
+    // P11 21:
+    // P12 22:
+    // P13 23:
     P11 = PTarget.col(0);
     P21 = PTarget.col(1);
     P12 = PTarget.col(2);

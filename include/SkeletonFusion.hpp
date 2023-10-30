@@ -22,11 +22,11 @@ using namespace Eigen;
 class OpWrapper{
 private:
     Mat input_img;
-    Wrapper opWrapper{op::ThreadManagerMode::Asynchronous};
+    Wrapper opWrapper = Wrapper{op::ThreadManagerMode::Asynchronous};
     shared_ptr<std::vector<std::shared_ptr<op::Datum>>> datumProcessed;
     void configureWrapper();
     bool display();
-    void processKeypoints(const Mat& frameD, double fx, double fy, double cx, double cy);
+    void processKeypoints(const Mat& frameD, double fx, double fy, double cx, double cy, MatrixXd*, VectorXd*);
     MatrixXd skeleton;
     VectorXd confidence;
 public:
@@ -40,6 +40,7 @@ public:
 //inline OpWrapper::OpWrapper()= default;
 
 inline OpWrapper::OpWrapper(){
+//    opWrapper = new Wrapper{op::ThreadManagerMode::Asynchronous};
     opLog("Starting OpenPose demo...", op::Priority::High);
     const auto opTimer = op::getTimerInit();
 
@@ -157,14 +158,12 @@ inline void OpWrapper::run(Mat* frame, const Mat* frameD, const double* fx, cons
         const double* cx, const double* cy, const bool* noDisplay, MatrixXd *sk, VectorXd * acc) {
     const op::Matrix imageToProcess = OP_CV2OPCONSTMAT(*frame); //OP_CV2OPCONSTMAT
     datumProcessed = opWrapper.emplaceAndPop(imageToProcess);
+//    auto datumTemplate = opWrapper.emplaceAndPop(imageToProcess);
+    *frame = OP_OP2CVCONSTMAT(datumProcessed->at(0)->cvOutputData);
     if (datumProcessed != nullptr)
     {
-//        frame = OP_OP2CVCONSTMAT(datumProcessed->at(0)->cvOutputData);
-        processKeypoints(*frameD, *fx, *fy, *cx, *cy);
-        *sk = skeleton;
-        *acc = confidence;
+        processKeypoints(*frameD, *fx, *fy, *cx, *cy, sk, acc);
         if (!noDisplay)
-//        if (true)
         {
             const auto userWantsToExit = display();
             if (userWantsToExit)
@@ -173,13 +172,14 @@ inline void OpWrapper::run(Mat* frame, const Mat* frameD, const double* fx, cons
                 exit(1);
             }
         }
+//        datumProcessed = datumTemplate;
     }
     else{
         op::opLog("Video could not be processed.", op::Priority::High);
     }
 }
 
-inline void OpWrapper::processKeypoints(const Mat& frameD, double fx, double fy, double cx, double cy)
+inline void OpWrapper::processKeypoints(const Mat& frameD, double fx, double fy, double cx, double cy, MatrixXd *sk, VectorXd *acc)
 {
     try
     {
@@ -187,11 +187,10 @@ inline void OpWrapper::processKeypoints(const Mat& frameD, double fx, double fy,
         {
             if(datumProcessed->at(0)->poseKeypoints.getCvMat().dims()!=0)
             {
-                skeleton = MatrixXd::Zero(3,25);
-                confidence = VectorXd::Zero(25);
+                MatrixXd sk_t = MatrixXd::Zero(3,25);
+                VectorXd conf_t = VectorXd::Zero(25);
                 op::Array<float> keypoints = datumProcessed->at(0)->poseKeypoints;
                 vector<int> dim = keypoints.getSize(); // dim: 1x25x3
-
                 for(int i=0; i<dim[1]; i++){
                     auto x = keypoints.at({0,i,0});
                     auto y = keypoints.at({0,i,1});
@@ -204,9 +203,13 @@ inline void OpWrapper::processKeypoints(const Mat& frameD, double fx, double fy,
                     }
                     double X = ((x - cx)/fx)*depth;
                     double Y = ((y - cy)/fy)*depth;
-                    skeleton.col(i) << X, Y, depth;
-                    confidence(i) = a;
+                    sk_t.col(i) << X, Y, depth;
+                    conf_t(i) = a;
                 }
+                *sk = sk_t;
+                *acc = conf_t;
+                skeleton = sk_t;
+                confidence = conf_t;
 //                cout<<"skeleton pixel: "<<keypoints.at({0,0,0})<<" "<<keypoints.at({0,1,0})<<endl;
             }
         }

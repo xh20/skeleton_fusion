@@ -38,13 +38,13 @@ DEFINE_bool(save_images, true, "save all images");
 //              "Give the first video file path");
 //DEFINE_string(depthDir2, "/media/dataset/translation/results_medical2/845112070795/depth/",
 //              "Give the second video file path");
-DEFINE_string(colorDir1, "/home/geriatronics/hao/skeleton_fusion/results/original1/",  // results_dailytask results_medical
+DEFINE_string(colorDir1, "/home/geriatronics/hao/skeleton_fusion/results/213322071238/original/",  // results_dailytask results_medical
               "Give the first video file path");
-DEFINE_string(colorDir2, "/home/geriatronics/hao/skeleton_fusion/results/original2/", // results_test results_daily1
+DEFINE_string(colorDir2, "/home/geriatronics/hao/skeleton_fusion/results/934222072657/original/", // results_test results_daily1
               "Give the second video file path");
-DEFINE_string(depthDir1, "/home/geriatronics/hao/skeleton_fusion/results/depth1/",
+DEFINE_string(depthDir1, "/home/geriatronics/hao/skeleton_fusion/results/213322071238/depth/",
               "Give the first video file path");
-DEFINE_string(depthDir2, "/home/geriatronics/hao/skeleton_fusion/results/depth2/",
+DEFINE_string(depthDir2, "/home/geriatronics/hao/skeleton_fusion/results/934222072657/depth/",
               "Give the second video file path");
 
 
@@ -93,7 +93,7 @@ void MyTextOnImage(Mat img, const string& text){
 class SkeletonMerger
 {
 private:
-    double cx1, cy1, fx1, fy1, cx2, cy2, fx2, fy2, tagSize, L1, L2, Lambda1, Lambda2, stepSize;
+    double cx1, cy1, fx1, fy1, cx2, cy2, fx2, fy2, tagSize, L1, L2, Lambda1, Lambda2, stepSize, upperArmLength, lowerArmLength;
     Mat frame1, frame2, frameD1, frameD2;
     VectorXd Acc1, Acc2, AccTarget;
     MatrixXd Sk1, Sk2, Sk1Cam2, Sk2Cam1, PTarget, PCam1, PCam2;
@@ -120,11 +120,15 @@ public:
     void setTarget(int t[], const double& length, const double& lambda, const double& delta, const double& size);
     void setThreeTargets(int *t, const double& l1, const double& l2, const double& lambda1,
                         const double& lambda2, const double& delta, const double& size);
-    void processing(Mat* f1, Mat* f2, const Mat* fD1, const Mat* fD2, bool*);
+    void processing(Mat* f1, Mat* f2, const Mat* fD1, const Mat* fD2, bool*, const bool*);
     tuple<Vector3d, Vector3d> getEstimation();
     tuple<Vector3d, Vector3d, Vector3d> getThreeEstimation();
-    bool isTransformed() const;
+    [[nodiscard]] bool isTransformed() const;
     tuple<Matrix3d, Vector3d> getHumanCamTF();
+    double getAngleOfTwoVectors(const Vector3d *, const Vector3d *);
+
+    Vector3d angles_BS;
+    double angleArm, angleArmTorso, angleArmX, angleArmY;
 };
 
 #include <map>
@@ -138,7 +142,8 @@ public:
 
 inline SkeletonMerger::SkeletonMerger():cx1(647.3279),cy1(368.2103),fx1(919.0278),fy1(917.8309),
 cx2(641.4802),cy2(375.7990),fx2(921.8261),fy2(921.8929), gotTrans(false),
-tagSize(0.1660),index(1), countTF(0){
+tagSize(0.1660),index(1), countTF(0), upperArmLength(0.0), lowerArmLength(0.0),
+angleArm(0.0), angleArmTorso(0.0), angleArmX(0.0), angleArmY(0.0){
     OW = new OpWrapper;
     TD = new TagDetector;
     RSum.setZero();
@@ -218,6 +223,7 @@ inline void SkeletonMerger::setCamParameters(const double& ffx1, const double& f
     K2 << fx2, 0.0, cx2, 0.0, fy2, cy2, 0.0, 0.0, 1.0;
 }
 
+// return rotation and translation between cameras
 inline void SkeletonMerger::updateRT(){
     Matrix3d R1, R2, R1PnP, R2PnP; Vector3d T1, T2, c1, c2, C1, C2, T1PnP, T2PnP;
 
@@ -244,7 +250,7 @@ inline void SkeletonMerger::updateRT(){
         P1 = T1(2)*K1.inverse()*c1;
         c1 = K1*(C1/C1(2));
 //        cout<<"K1\n"<<K1<<endl;
-        MyFilledCircle(frame1, cv::Point(c1(0),c1(1)),Scalar(0,255,0 ));
+        MyFilledCircle(frame1, cv::Point(int(c1(0)),int(c1(1))),Scalar(0,255,0 ));
 
     }
     // cam2 coordiante
@@ -265,7 +271,7 @@ inline void SkeletonMerger::updateRT(){
         P2 = T2(2)*K2.inverse()*c2;
         c2 = K2*(C2/C2(2));
 //        cout<<"K2\n"<<K2<<endl;
-        MyFilledCircle(frame2, cv::Point(c2(0),c2(1)),Scalar(0,0,255)); //red
+        MyFilledCircle(frame2, cv::Point(int(c2(0)),int(c2(1))),Scalar(0,0,255)); //red
     }
     if(detected1 && detected2) {
 //        R12 = m2*m1.transpose(); // cam1 -> cam2
@@ -295,17 +301,25 @@ inline void SkeletonMerger::updateRT(){
 //    cout<<"difference of P1 at cam2: "<<(P1Cam2 - T2).norm()<<endl;
     auto tag1OnCam2 = K2*(P1Cam2/P1Cam2(2));
     // wrong re projection
-    MyFilledCircle(frame2, cv::Point(tag1OnCam2(0),tag1OnCam2(1)),Scalar( 0, 255, 255 ));
+    MyFilledCircle(frame2, cv::Point(int(tag1OnCam2(0)),int(tag1OnCam2(1))),Scalar( 0, 255, 255 ));
 //    Vector3d P2Cam1 = R12.transpose()*T2 + T12;
     Vector3d P2Cam1 = R12.transpose()*C2 + T12;
 //        Vector3d P2Cam1 = R21*(T2 - T21);
 //    cout<<"difference of P2 at cam1: "<<(P2Cam1 - T1).norm()<<endl;
     auto tag2OnCam1 = K1*(P2Cam1/P2Cam1(2));
-    MyFilledCircle(frame1, cv::Point(tag2OnCam1(0),tag2OnCam1(1)),Scalar( 0, 255, 255 ));
+    MyFilledCircle(frame1, cv::Point(int(tag2OnCam1(0)),int(tag2OnCam1(1))),Scalar( 0, 255, 255 ));
 }
 
+inline double SkeletonMerger::getAngleOfTwoVectors(const Vector3d *v1, const Vector3d *v2){
+    auto dot = v1->dot(*v2);
+    auto det = v1->norm()*v2->norm();
+    auto angle = acos(dot/det)*180/M_PI;
+//    cout<<"Angle: "<<angle<<endl;
+    return angle;
+}
 
-inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const Mat *fD2, bool* skDetected) {
+inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const Mat *fD2, bool* skDetected,
+                                       const bool* isDisplay) {
     *skDetected = false;
     setFrames(*f1, *f2, *fD1, *fD2);
 //    Matrix3d PEstimated, PETranslated, PixelEstimated;
@@ -317,53 +331,71 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
 
     // 3D Skeleton prediction (Sk1, Sk2)
     bool noDisplay = true;
-    thread t5(&OpWrapper::run, OW, &frame1, &frameD1, &fx1, &fy1, &cx1, &cy1, &noDisplay, &Sk1, &Acc1);
-    thread t6(&OpWrapper::run, OW, &frame2, &frameD2, &fx2, &fy2, &cx2, &cy2, &noDisplay, &Sk2, &Acc2);
-    t5.join();
-    t6.join();
+    OW->run(f1, fD1, &fx1, &fy1, &cx1, &cy1, &noDisplay, &Sk1, &Acc1);
+    OW->run(f2, fD2, &fx2, &fy2, &cx2, &cy2, &noDisplay, &Sk2, &Acc2);
+//    cout<<"K1\n"<<K1<<endl;
+//    cout<<"K2\n"<<K2<<endl;
+
+//    thread t5(&OpWrapper::run, OW, f1, fD1, &fx1, &fy1, &cx1, &cy1, &noDisplay, &Sk1, &Acc1);
+//    thread t6(&OpWrapper::run, OW, f2, fD2, &fx2, &fy2, &cx2, &cy2, &noDisplay, &Sk2, &Acc2);
+//    t5.join();
+//    t6.join();
 
     if (Sk1.cols()==0 || Sk2.cols()==0){
         return;
     }
     *skDetected = true;
-    auto PNeckTest = Sk2.col(1);
-    auto PHipTest = Sk2.col(8);
-    auto PShoulderTest = Sk2.col(2);
 
     auto ANeck = Acc2(1);
     auto AHip = Acc2(8);
     auto AShoulder = Acc2(2);
-    // initialize TF
-    if (ANeck>0.5 && AHip>0.5 && AShoulder>0.5 && countTF<5){
-        PNeck = PNeckTest;
-        PHip = PHipTest;
-        PShoulder = PShoulderTest;
-        Vector3d XHumanCam = PShoulder - PNeck;
-        XHumanCam = XHumanCam/XHumanCam.norm();
-        Vector3d ZHumanCam = PNeck - PHip;
-        ZHumanCam = ZHumanCam/ZHumanCam.norm();
-        Vector3d YHumanCam = ZHumanCam.cross(XHumanCam);
-        cout<<"YHuman "<<YHumanCam.norm()<<endl;
-        Vector3d XHuman(1,0,0);
-        Vector3d YHuman(0,1,0);
-        Vector3d ZHuman(0,0,1);
-        MatrixXd B = XHuman*(XHumanCam.transpose()) + ZHuman*(ZHumanCam.transpose()) + YHuman*(YHumanCam.transpose()) ;
-        JacobiSVD<MatrixXd> svd(B, ComputeThinU | ComputeThinV);
-        Matrix3d M;
-        const auto& U = svd.matrixU();
-        const auto& V = svd.matrixV();
-        M.diagonal()<< 1, 1, U.determinant()*V.determinant();
-        RHumanCam = U*M*V.transpose();
-        THumanCam = PNeck;
+    // initialize TF and limbs length
+    if (ANeck>0.5 && AHip>0.5 && AShoulder>0.5){
+        PNeck = Sk2.col(1);
+        PHip = Sk2.col(8);
+        PShoulder = Sk2.col(2);
         countTF ++;
-        cout<<"Rotation: \n"<<RHumanCam<<endl;
+    }
+    Vector3d XHumanCam = PShoulder - PNeck;
+    XHumanCam = XHumanCam/XHumanCam.norm();
+    Vector3d ZHumanCam = PNeck - PHip;
+    ZHumanCam = ZHumanCam/ZHumanCam.norm();
+    Vector3d YHumanCam = ZHumanCam.cross(XHumanCam);
+//       cout<<"YHuman "<<YHumanCam.norm()<<endl;
+    Vector3d XHuman(1,0,0);
+    Vector3d YHuman(0,1,0);
+    Vector3d ZHuman(0,0,1);
+    MatrixXd B = XHuman*(XHumanCam.transpose()) + ZHuman*(ZHumanCam.transpose()) + YHuman*(YHumanCam.transpose()) ;
+    JacobiSVD<MatrixXd> svd(B, ComputeThinU | ComputeThinV);
+    Matrix3d M;
+    const auto& U = svd.matrixU();
+    const auto& V = svd.matrixV();
+    M.diagonal()<< 1, 1, U.determinant()*V.determinant();
+    RHumanCam = U*M*V.transpose();
+    THumanCam = PNeck;
+//        cout<<"Rotation: \n"<<RHumanCam<<endl;
+//        cout<<"Translation: \n"<<THumanCam<<endl;
+
 //        cout<<"Neck: \n"<<PNeck<<endl;
 //        cout<<"Hip: \n"<<PHip<<endl;
 //        cout<<"Shoulder: \n"<<PShoulder<<endl;
-        cout<<"Translation: \n"<<THumanCam<<endl;
 
-    }
-    else if(countTF >= 5){
+    auto PWrist2 = Sk2.col(4);
+    auto PElbow2 = Sk2.col(3);
+    auto PShoulder2 = Sk2.col(2);
+    auto PWrist1 = Sk1.col(4);
+    auto PElbow1 = Sk1.col(3);
+    auto PShoulder1 = Sk1.col(2);
+
+    double upperL1 = (PShoulder1 - PElbow1).norm();
+    double lowerL1 = (PWrist1 - PElbow1).norm();
+
+    double upperL2 = (PShoulder2 - PElbow2).norm();
+    double lowerL2 = (PWrist2 - PElbow2).norm();
+//    cout<<"upper limb length: "<<upperL1<<" "<<upperL2<<endl;
+//    cout<<"lower limb length: "<<lowerL1<<" "<<lowerL2<<endl;
+
+    if(countTF >= 5){
         transformed = true;
     }
 
@@ -374,17 +406,20 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
 
     // select target joints and plot test point on both frames
     for (int i=0; targetCount > i; i++) {
-        // PTarget: P11, P21, P12, P22
+        // PTarget: P11, P21 (shoulder) P12, P22 (elbow), P13, P23 (wrist)
         PTarget.middleCols(2*i,2) << Sk1Cam2.col(target[i+1]), Sk2.col(target[i+1]);
         AccTarget.middleRows(2*i,2) << Acc1(target[i+1]), Acc2(target[i+1]);
         PCam1.col(i) << Sk1.col(target[i+1]);
         PCam2.col(i) << Sk2.col(target[i+1]);
         Vector3d Ptest = Sk1Cam2.col(target[i+1]);
         Vector3d pTestCam2 = K2*(Ptest/Ptest(2));
-        MyFilledCircle(frame2, cv::Point(pTestCam2(0),pTestCam2(1)),Scalar( 0, 255, 0 ));
-        Vector3d Ptest2 = Sk1.col(target[i+1]);
-        Vector3d pTestCam1 = K1*(Ptest2/Ptest2(2));
-        MyFilledCircle(frame1, cv::Point(pTestCam1(0),pTestCam1(1)),Scalar( 0, 255, 0 ));
+        MyFilledCircle(*f2, cv::Point(int(pTestCam2(0)),int(pTestCam2(1))),Scalar( 0, 255, 0 ));
+        Vector3d Ptest1 = Sk1.col(target[i+1]);
+        Vector3d pTestCam1 = K1*(Ptest1/Ptest1(2));
+//        cout<<"K1: \n" <<K1<<endl;
+//        cout<<"P1 3D:\n"<<Ptest1<<endl;
+//        cout<<"p1 2D:\n"<<pTestCam1<<endl;
+        MyFilledCircle(*f1, cv::Point(int(pTestCam1(0)),int(pTestCam1(1))),Scalar( 0, 255, 0 ));
     }
 //    cout<<"Accuracy: \n"<<AccTarget<<endl;
 //    cout<<"target joints: \n"<<PTarget<<endl;
@@ -398,64 +433,110 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
     GNC.setupGNC(PTarget, AccTarget, L1, Lambda1, stepSize, 3);
     GNC.run(true, index);
 //        PEstimated = GNC.getEstimation();
-        // P1, P2, P3 Vector3d
-//    tie(P1, P2) = GNC.getTwoPointsEstimation();
+
+    // Get arm three points: P1 shoulder, P2 elbow, P3 wrist Vector3d
     tie(P1, P2, P3) = GNC.getThreePointsEstimation();
+//    cout<<"Estimated limb length: "<<(P1-P2).norm()<<" "<<(P2-P3).norm()<<endl;
 //    cout<<"target point: \n"<<PTarget<<endl;
 //    cout<<"Estimated point 1: \n"<<P1<<endl;
 //    cout<<"Estimated point 2: \n"<<P2<<endl;
 //    cout<<"Estimated point 3: \n"<<P3<<endl;
+
+    // Get angles
+    Vector3d upperArm = P1 - P2;
+    Vector3d lowerArm = P3 - P2;
+    Vector3d neck2Shoulder = P1 - PNeck;
+    Vector3d neck2Midhip = PHip - PNeck;
+    angleArm = getAngleOfTwoVectors(&upperArm, &lowerArm);
+    {
+        // Shoulder frame
+        Vector3d ZShoulder = P1 - P2;
+        ZShoulder = ZShoulder/ZShoulder.norm();
+        Vector3d randomShoulderOnZY = P3 - P2;
+        randomShoulderOnZY = randomShoulderOnZY/randomShoulderOnZY.norm();
+        Vector3d YShoulder = ZShoulder.cross(randomShoulderOnZY);
+        Vector3d XShoulder = YShoulder.cross(ZShoulder);
+
+        // Base frame
+        Vector3d ZBase = PNeck - PHip;
+        ZBase = ZBase/ZBase.norm();
+        Vector3d YBase = PNeck - P1;
+        YBase = YBase/YBase.norm();
+        Vector3d XBase = YBase.cross(ZBase);
+//        cout<<"Shoulder XYZ: "<< XShoulder<<endl<<YShoulder<<endl<<ZShoulder<<endl;
+//        cout<<"Base XYZ: "<< XBase<<endl<<YBase<<endl<<ZBase<<endl;
+        MatrixXd Base_shoulder = XBase*(XShoulder.transpose()) + ZBase*(ZShoulder.transpose()) + YBase*(YShoulder.transpose()) ;
+        JacobiSVD<MatrixXd> svd_BS(Base_shoulder, ComputeThinU | ComputeThinV);
+        Matrix3d M_BS;
+        const auto& U_BS = svd_BS.matrixU();
+        const auto& V_BS = svd_BS.matrixV();
+        M_BS.diagonal()<< 1, 1, U_BS.determinant()*V_BS.determinant();
+//        auto RShoulderBase = U_BS*M_BS*V_BS.transpose();
+        auto RShoulderBase = U_BS*V_BS.transpose();
+        //0:roll(X), 1: pitch (Y), 2:yaw (Z)
+        angles_BS = Matrix3d(RShoulderBase).eulerAngles(2, 1, 0)*180/M_PI;
+        cout<< "Angles between Shoulder and Base: "<<angles_BS<<endl;
+        angleArmTorso = getAngleOfTwoVectors(&ZShoulder, &ZBase);
+        angleArmX = getAngleOfTwoVectors(&XShoulder, &XBase);
+        angleArmY = getAngleOfTwoVectors(&YShoulder, &YBase);
+        cout<<"angleArmTorso: "<<angleArmTorso<<endl;
+        cout<<"angleArmY: "<<angleArmY<<endl;
+        cout<<"angleArmX: "<<angleArmX<<endl;
+    }
+
+//    cout<<"flexion angle: "<<angleArm<<endl;
     // Visulization
-    // P1 on cam 1
-    PETranslated = (R12.transpose()*P1) + T12;
-    PixelEstimated = K1*(PETranslated/PETranslated(2));
-    MyFilledCircle(frame1, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
-    // P1 on cam 2
-    PixelEstimated = K2*(P1/P1(2));
-    MyFilledCircle(frame2, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
+    if(*isDisplay){
+        // P1 on cam 1
+        PETranslated = (R12.transpose()*P1) + T12;
+        PixelEstimated = K1*(PETranslated/PETranslated(2));
+        MyFilledCircle(*f1, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
+        // P1 on cam 2
+        PixelEstimated = K2*(P1/P1(2));
+        MyFilledCircle(*f2, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
 
-    // P2 on cam 1
-    PETranslated = (R12.transpose()*P2) + T12;
-    PixelEstimated = K1*(PETranslated/PETranslated(2));
-    MyFilledCircle(frame1, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
-    // P2 on cam 2
-    PixelEstimated = K2*(P2/P2(2));
-    MyFilledCircle(frame2, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
+        // P2 on cam 1
+        PETranslated = (R12.transpose()*P2) + T12;
+        PixelEstimated = K1*(PETranslated/PETranslated(2));
+        MyFilledCircle(*f1, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
+        // P2 on cam 2
+        PixelEstimated = K2*(P2/P2(2));
+        MyFilledCircle(*f2, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
 
-    // P3 on cam 1
-    PETranslated = (R12.transpose()*P3) + T12;
-    PixelEstimated = K1*(PETranslated/PETranslated(2));
-    MyFilledCircle(frame1, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
-    // P3 on cam 2
-    PixelEstimated = K2*(P3/P3(2));
-    MyFilledCircle(frame2, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
+        // P3 on cam 1
+        PETranslated = (R12.transpose()*P3) + T12;
+        PixelEstimated = K1*(PETranslated/PETranslated(2));
+        MyFilledCircle(*f1, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
+        // P3 on cam 2
+        PixelEstimated = K2*(P3/P3(2));
+        MyFilledCircle(*f2, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
 
-    // P21 on cam1
-    auto PTest21 = PTarget.col(1);
-    PETranslated = (R12.transpose()*PTest21) + T12;
-    PixelEstimated = K1*(PETranslated/PETranslated(2));
+        // P21 on cam1
+        auto PTest21 = PTarget.col(1);
+        PETranslated = (R12.transpose()*PTest21) + T12;
+        PixelEstimated = K1*(PETranslated/PETranslated(2));
 //    MyFilledCircle(frame1, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar(255,255,0));
-    // P22 on cam1
-    auto PTest22 = PTarget.col(3);
-    PETranslated = (R12.transpose()*PTest22) + T12;
-    PixelEstimated = K1*(PETranslated/PETranslated(2));
+        // P22 on cam1
+        auto PTest22 = PTarget.col(3);
+        PETranslated = (R12.transpose()*PTest22) + T12;
+        PixelEstimated = K1*(PETranslated/PETranslated(2));
 //    MyFilledCircle(frame1, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar(255,255,0));
 
-    // P11 on cam2
-    auto PTest11 = PTarget.col(0);
+        // P11 on cam2
+        auto PTest11 = PTarget.col(0);
 //    auto PETranslated21 = R21.transpose()*PTest11 + T21;
-    auto PETranslated21 = R12*(PTest11 - T12);
-    auto PixelEstimated21 = K2*(PETranslated21/PETranslated21(2));
+        auto PETranslated21 = R12*(PTest11 - T12);
+        auto PixelEstimated21 = K2*(PETranslated21/PETranslated21(2));
 //    MyFilledCircle(frame2, cv::Point(PixelEstimated21(0),PixelEstimated21(1)),Scalar(255,0,0));
-    // P12 on cam2
-    auto PTest12 = PTarget.col(2);
+        // P12 on cam2
+        auto PTest12 = PTarget.col(2);
 //    PETranslated = R21.transpose()*PTest12 + T21;
-    PETranslated = R12*(PTest12 - T12);
-    PixelEstimated = K2*(PETranslated/PETranslated(2));
+        PETranslated = R12*(PTest12 - T12);
+        PixelEstimated = K2*(PETranslated/PETranslated(2));
 //    MyFilledCircle(frame2, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar(255,0,0));
-
-    *f1 = frame1;
-    *f2 = frame2;
+    }
+//    *f1 = frame1;
+//    *f2 = frame2;
 }
 
 
@@ -611,7 +692,7 @@ int main(int argc, char** argv){
 //    int target[] = {3,7,6,5};
     int target[] = {3,4,3,2};
     double tagSize = 0.166; // 0.215
-    double constrainLength1 = 0.23, constrainLength2 = 0.27, lambda1 = 1000.0, lambda2 = 1000.0, stepSize = 0.01;
+    double constrainLength1 = 0.24, constrainLength2 = 0.27, lambda1 = 1000.0, lambda2 = 1000.0, stepSize = 0.01;
 
 //    SM.setTarget(target, constrainLength1, lambda1, stepSize, tagSize);
     SM.setThreeTargets(target, constrainLength1, constrainLength2, lambda1, lambda2, stepSize, tagSize);
@@ -643,8 +724,8 @@ int main(int argc, char** argv){
             frameD1 = imread(depthDir1, -1);
             frameD2 = imread(depthDir2, -1);
             cout<<"frame: "<<index<<endl;
-            bool skDetected = false;
-            SM.processing(&frame1, &frame2, &frameD1, &frameD2, &skDetected);
+            bool skDetected = false, isDisplay = false;
+            SM.processing(&frame1, &frame2, &frameD1, &frameD2, &skDetected, &isDisplay);
             if(!skDetected)
                 continue;
             Vector3d P1, P2;
@@ -733,7 +814,6 @@ int main(int argc, char** argv){
 //            imshow("depth1: ", depthMat1);
 //            imshow("depth2: ", depthMat2);
 
-
 //            Mat depthresult;
 //            hconcat(depthMat1, depthMat2, depthresult);
 //            imshow("Two Depth Cameras", depthresult);
@@ -741,8 +821,8 @@ int main(int argc, char** argv){
 //            hconcat(colorMat1, colorMat2, colorResult);
 //            imshow("Two Color Cameras", colorResult);
 
-            bool skDetected = false;
-            SM.processing(&colorMat1, &colorMat2, &depthMat1, &depthMat2, &skDetected);
+            bool skDetected = false, isDisplay = false;
+            SM.processing(&colorMat1, &colorMat2, &depthMat1, &depthMat2, &skDetected, &isDisplay);
 //            if(!skDetected)
 //                continue;
             Mat colorResult;
@@ -797,12 +877,12 @@ int main(int argc, char** argv){
 
         }
         if(FLAGS_save_images){
-            string colorSaveDir1 = saveDir / "color1";
-            string depthSaveDir1 = saveDir / "depth1";
-            string colorSaveDir2 = saveDir / "color2";
-            string depthSaveDir2 = saveDir / "depth2";
-            string colorOriginalDir1 = saveDir / "original1";
-            string colorOriginalDir2 = saveDir / "original2";
+            string colorSaveDir1 = saveDir / serials[0] / "color";
+            string depthSaveDir1 = saveDir / serials[0] / "depth";
+            string colorSaveDir2 = saveDir / serials[1] /"color2";
+            string depthSaveDir2 = saveDir / serials[1] / "depth2";
+            string colorOriginalDir1 = saveDir / serials[0] / "original";
+            string colorOriginalDir2 = saveDir / serials[1] / "original";
             saveImages(colorSaveDir1, colorSaveName, colorSaveImages_ptr1);
             saveImages(depthSaveDir1, depthSaveName, depthSaveImages_ptr1);
             saveImages(colorSaveDir2, colorSaveName, colorSaveImages_ptr2);
@@ -812,13 +892,45 @@ int main(int argc, char** argv){
         }
     }
     else{
+        ifstream camParametersTxt(fs::path(FLAGS_saveDir)/"cam_parameters.txt");
+        vector<vector<string>> camsParametersVec;
+        if (camParametersTxt.is_open())
+        {
+            string line;
+            while ( getline (camParametersTxt, line) )
+            {
+                auto lineS = splitString(line, " ");
+                camsParametersVec.push_back(lineS);
+            }
+            camParametersTxt.close();
+        }
+
+        string cam1Name = FLAGS_colorDir1;
+        auto nameVec1 = splitString(cam1Name, "/");
+        string cam2Name = FLAGS_colorDir2;
+        auto nameVec2 = splitString(cam2Name, "/");
+        if(nameVec1[nameVec1.size()-3]==camsParametersVec[0][0]){
+            SM.setCamParameters(stod(camsParametersVec[0][1]), stod(camsParametersVec[0][2]),
+                                stod(camsParametersVec[0][3]), stod(camsParametersVec[0][4]),
+                                stod(camsParametersVec[1][1]), stod(camsParametersVec[1][2]),
+                                stod(camsParametersVec[1][3]), stod(camsParametersVec[1][4]));
+        }
+        else if (nameVec2[nameVec2.size()-3]==camsParametersVec[0][0]){
+            SM.setCamParameters(stod(camsParametersVec[1][1]), stod(camsParametersVec[1][2]),
+                                stod(camsParametersVec[1][3]), stod(camsParametersVec[1][4]),
+                                stod(camsParametersVec[0][1]), stod(camsParametersVec[0][2]),
+                                stod(camsParametersVec[0][3]), stod(camsParametersVec[0][4]));
+        }
+        else
+            throw std::invalid_argument( "the serial number of camera is not found on camParametersTxt file!" );
+
         std::vector<fs::path> filenames;
         for (const auto& entry : fs::directory_iterator{FLAGS_colorDir1}) {
             filenames.push_back(entry.path().filename());
             frameNumber ++;
         }
         cout<<"frameNumber: "<<frameNumber<<endl;
-        predictionTxt << frameNumber<<" " << target[0]*3 + 1 <<'\n';
+        predictionTxt<<"frameNumber: " << frameNumber<<'\n';
         std::sort(filenames.begin(), filenames.end(), [](const auto& lhs, const auto& rhs)
         {
             string lhs_ = lhs.string();
@@ -847,11 +959,11 @@ int main(int argc, char** argv){
 
             if (frame2.empty() || frame1.empty() || frameD2.empty() || frameD1.empty())
                 break;
-            bool skDetected = false;
-            SM.processing(&frame1, &frame2, &frameD1, &frameD2, &skDetected);
+            bool skDetected = false, isDisplay=true;
+            SM.processing(&frame1, &frame2, &frameD1, &frameD2, &skDetected, &isDisplay);
             Mat colorResult;
-            MyTextOnImage(frame1,"Camera 1: red (approximation)");
-            MyTextOnImage(frame2,"Camera 2");
+            MyTextOnImage(frame1,"Camera 1: red (approximation)" );
+            MyTextOnImage(frame2,"Camera 2 " + to_string(SM.angleArm));
             hconcat(frame1, frame2, colorResult);
             imshow("Two Color Cameras", colorResult);
             if(!skDetected)
@@ -865,9 +977,14 @@ int main(int argc, char** argv){
 //            cout<<"predicted length1 : "<<l1<<" length2: "<< l2 <<endl;
             length1.push_back(l1);
 
-//            predictionTxt << P3(0) << " " << P3(1) << " " << P3(2)
-//                          << " " << P2(0) << " " <<P2(1) << " " <<P2(2)
-//                          << " " << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
+            predictionTxt <<"Joints (Shoulder-Elbow-Wrist in rowwise):\n"
+            << P3(0) << " " << P3(1) << " " << P3(2) <<'\n'
+            << " " << P2(0) << " " <<P2(1) << " " <<P2(2) <<'\n'
+            << " " << P1(0) << " " <<P1(1) << " " <<P1(2) <<'\n';
+            predictionTxt <<"Angles predicted by SVD rotation matrix (Rz*Ry*Rx):\n" << SM.angles_BS.transpose()<<'\n';
+            predictionTxt <<"Angles calculated by acos (Z_shoulder and Z_base, Y_shoulder and Y_base, X_shoulder and X_base):\n"
+            << SM.angleArmTorso<<' ' << SM.angleArmY<<' ' << SM.angleArmX<<'\n';
+            predictionTxt<<"Flexion angle: "<<SM.angleArm <<'\n' <<'\n';
             if(isTransformed){
                 tie(RHumanCam, THumanCam) = SM.getHumanCamTF();
                 P3 = RHumanCam*(P3 - THumanCam);
@@ -881,9 +998,12 @@ int main(int argc, char** argv){
 //                              << " " << -P2(0) << " " << -P2(2) << " " << - P2(1)
 //                              << " " << -P1(0)<< " " << -P1(2) << " " << -P1(1) <<'\n';
             }
-//            string saveDir = FLAGS_saveDir + "output_" + stamp + ".png";
-//            cout<<"savedir: "<<saveDir<<endl;
-//            imwrite(saveDir, result);
+            string saveDir = fs::path(FLAGS_saveDir) / "output/" ;
+            if(!fs::exists(saveDir)){
+                fs::create_directories(saveDir);
+            }
+            cout<<"savedir: "<<saveDir<<endl;
+            imwrite(fs::path(saveDir) / img, colorResult);
             index ++;
             int key = waitKey(1); // key is an integer here
             if (key == 27)
