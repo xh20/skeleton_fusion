@@ -11,9 +11,10 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 #include <matplotlibcpp.h>
-#include <experimental/filesystem>
+//#include <experimental/filesystem>
 #include <map>
 #include <eigen3/Eigen/Dense>
+#include <OsqpEigen/OsqpEigen.h>
 #include <librealsense2/rs.hpp>
 
 using namespace std;
@@ -38,19 +39,19 @@ DEFINE_bool(save_images, true, "save all images");
 //              "Give the first video file path");
 //DEFINE_string(depthDir2, "/media/dataset/translation/results_medical2/845112070795/depth/",
 //              "Give the second video file path");
-DEFINE_string(colorDir1, "/home/geriatronics/hao/skeleton_fusion/results/213322071238/original/",  // results_dailytask results_medical
+DEFINE_string(colorDir1, "/home/geriatronics/hao/skeleton_fusion/results_slow_up/213322071238/original/",  // results_dailytask results_medical
               "Give the first video file path");
-DEFINE_string(colorDir2, "/home/geriatronics/hao/skeleton_fusion/results/934222072657/original/", // results_test results_daily1
+DEFINE_string(colorDir2, "/home/geriatronics/hao/skeleton_fusion/results_slow_up/934222072657/original/", // results_test results_daily1
               "Give the second video file path");
-DEFINE_string(depthDir1, "/home/geriatronics/hao/skeleton_fusion/results/213322071238/depth/",
+DEFINE_string(depthDir1, "/home/geriatronics/hao/skeleton_fusion/results_slow_up/213322071238/depth/",
               "Give the first video file path");
-DEFINE_string(depthDir2, "/home/geriatronics/hao/skeleton_fusion/results/934222072657/depth/",
+DEFINE_string(depthDir2, "/home/geriatronics/hao/skeleton_fusion/results_slow_up/934222072657/depth/",
               "Give the second video file path");
 
 
 DEFINE_string(tagCode, "36h11", "Give the tag code to choose tag family");
 DEFINE_int32(TagID, 89, "Give the Tag ID to calculate the extrinsic parameters, hand marker: 89, table left: 54, table right: 25");
-DEFINE_string(saveDir, "/home/geriatronics/hao/skeleton_fusion/results/",
+DEFINE_string(saveDir, "/home/geriatronics/hao/skeleton_fusion/results_slow_up/",
               "Give the save path");
 
 double standardRad(double t) {
@@ -98,7 +99,7 @@ private:
     VectorXd Acc1, Acc2, AccTarget;
     MatrixXd Sk1, Sk2, Sk1Cam2, Sk2Cam1, PTarget, PCam1, PCam2;
     Matrix3d RSum, R12, K1, K2, R21, RHumanCam;
-    Vector3d TSum, T12, T21, P1, P2, P3, THumanCam, PNeck, PHip, PShoulder;
+    Vector3d TSum, T12, T21, P1, P2, P3, THumanCam, PNeck, PHip, YShoulderOld, XShoulderF0, YShoulderF0, ZShoulderF0;
     vector<double> L12, L23;
     bool gotTrans;
     // tag detector
@@ -125,10 +126,11 @@ public:
     tuple<Vector3d, Vector3d, Vector3d> getThreeEstimation();
     [[nodiscard]] bool isTransformed() const;
     tuple<Matrix3d, Vector3d> getHumanCamTF();
-    double getAngleOfTwoVectors(const Vector3d *, const Vector3d *);
+    double getAngleOfTwoVectors(const Vector3d&, const Vector3d&);
 
-    Vector3d angles_BS;
-    double angleArm, angleArmTorso, angleArmX, angleArmY;
+    Vector3d angles_f0f1, angles_f0f1_old, ZBase, YBase, XBase, angles_ShoulderBase, PShoulder, angles_SB_old;
+    Matrix3d RotationBaseShoulder, RShoulderF0F1;
+    double angleArm, angleArmTorso, angleArmX, angleArmY, angleShoulderTorso, angleShoulderX, angleZ, thetaX, thetaY, thetaZ, thetaZ_;
 };
 
 #include <map>
@@ -310,11 +312,11 @@ inline void SkeletonMerger::updateRT(){
     MyFilledCircle(frame1, cv::Point(int(tag2OnCam1(0)),int(tag2OnCam1(1))),Scalar( 0, 255, 255 ));
 }
 
-inline double SkeletonMerger::getAngleOfTwoVectors(const Vector3d *v1, const Vector3d *v2){
-    auto dot = v1->dot(*v2);
-    auto det = v1->norm()*v2->norm();
+inline double SkeletonMerger::getAngleOfTwoVectors(const Vector3d& v1, const Vector3d& v2){
+    auto dot = v1.dot(v2);
+    auto det = v1.norm()*v2.norm();
     auto angle = acos(dot/det)*180/M_PI;
-//    cout<<"Angle: "<<angle<<endl;
+//    auto angle = atan2(det, dot)*180/M_PI;
     return angle;
 }
 
@@ -324,7 +326,7 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
     setFrames(*f1, *f2, *fD1, *fD2);
 //    Matrix3d PEstimated, PETranslated, PixelEstimated;
     Vector3d PEstimated, PETranslated, PixelEstimated;
-    if(!gotTrans){
+    if (!gotTrans) {
         updateRT();
     }
 //    updateRT();
@@ -341,7 +343,7 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
 //    t5.join();
 //    t6.join();
 
-    if (Sk1.cols()==0 || Sk2.cols()==0){
+    if (Sk1.cols() == 0 || Sk2.cols() == 0) {
         return;
     }
     *skDetected = true;
@@ -349,63 +351,85 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
     auto ANeck = Acc2(1);
     auto AHip = Acc2(8);
     auto AShoulder = Acc2(2);
-    // initialize TF and limbs length
-    if (ANeck>0.5 && AHip>0.5 && AShoulder>0.5){
+    // initialize TF and limbs length Base Frame
+
+    if (countTF < 1) {
         PNeck = Sk2.col(1);
         PHip = Sk2.col(8);
         PShoulder = Sk2.col(2);
-        countTF ++;
-    }
-    Vector3d XHumanCam = PShoulder - PNeck;
-    XHumanCam = XHumanCam/XHumanCam.norm();
-    Vector3d ZHumanCam = PNeck - PHip;
-    ZHumanCam = ZHumanCam/ZHumanCam.norm();
-    Vector3d YHumanCam = ZHumanCam.cross(XHumanCam);
-//       cout<<"YHuman "<<YHumanCam.norm()<<endl;
-    Vector3d XHuman(1,0,0);
-    Vector3d YHuman(0,1,0);
-    Vector3d ZHuman(0,0,1);
-    MatrixXd B = XHuman*(XHumanCam.transpose()) + ZHuman*(ZHumanCam.transpose()) + YHuman*(YHumanCam.transpose()) ;
-    JacobiSVD<MatrixXd> svd(B, ComputeThinU | ComputeThinV);
-    Matrix3d M;
-    const auto& U = svd.matrixU();
-    const auto& V = svd.matrixV();
-    M.diagonal()<< 1, 1, U.determinant()*V.determinant();
-    RHumanCam = U*M*V.transpose();
-    THumanCam = PNeck;
-//        cout<<"Rotation: \n"<<RHumanCam<<endl;
-//        cout<<"Translation: \n"<<THumanCam<<endl;
+        YShoulderOld = PNeck - PShoulder;
+        // Base frame
+        ZBase = PNeck - PHip;
+        ZBase = ZBase / ZBase.norm();
+        YBase = PNeck - PShoulder;
+        YBase = YBase / YBase.norm();
+        XBase = YBase.cross(ZBase);
+        YBase = ZBase.cross(XBase);
+        YBase = YBase / YBase.norm();
 
-//        cout<<"Neck: \n"<<PNeck<<endl;
-//        cout<<"Hip: \n"<<PHip<<endl;
-//        cout<<"Shoulder: \n"<<PShoulder<<endl;
+    //       cout<<"YHuman "<<YHumanCam.norm()<<endl;
+        Vector3d XCam = Eigen::Vector3d::UnitX();
+        Vector3d YCam = Eigen::Vector3d::UnitY();
+        Vector3d ZCam = Eigen::Vector3d::UnitZ();
 
+        /*** For SVD: B = A*B_T, the rotation matrix is map B to A (A = R*B)
+        Vector3d XTest(0,0,-1);
+        Vector3d YTest(1, 0, 0);
+        Vector3d ZTest(0,-1,0);
+        MatrixXd BTest = XCam*(XTest.transpose()) + ZCam*(ZTest.transpose()) + YCam*(YTest.transpose()) ;
+        JacobiSVD<MatrixXd> svdTest(BTest, ComputeFullU | ComputeFullV);
+        const auto& UTest = svdTest.matrixU();
+        const auto& VTest = svdTest.matrixV();
+        Matrix3d RTest = UTest*VTest.transpose();
+        // index: 0, 1, 2 -> rotation order: x,y,z
+        // index: 2, 1, 0 -> rotation order: z,y,x
+        Vector3d anglesTest = 180/M_PI*RTest.eulerAngles(0, 1, 2);
+        Vector3d xCam = RTest*XTest;
+        Vector3d yCam = RTest*YTest;
+        Vector3d zCam = RTest*ZTest;
+    //    cout<<"rotated xCam: "<<xCam<<endl;
+    //    cout<<"original xCam: "<<XCam<<endl;
+    //    cout<<"rotated yCam: "<<yCam<<endl;
+    //    cout<<"original YCam: "<<YCam<<endl;
+    //    cout<<"rotated zCam: "<<zCam<<endl;
+    //    cout<<"original ZCam: "<<ZCam<<endl;
+    //    cout<< "angles test: "<<anglesTest[0]<<" "<<anglesTest[1]<<" "<<anglesTest[2]<<endl;
+         ***/
+        // Base= R*Cam
+//        MatrixXd B = XBase * (XCam.transpose()) + ZBase * (ZCam.transpose()) + YBase * (YCam.transpose());
+        MatrixXd B = XCam * (XBase.transpose()) + ZCam * (ZBase.transpose()) + YCam * (YBase.transpose());
+        JacobiSVD<MatrixXd> svd(B, ComputeFullU | ComputeFullV);
+        Matrix3d M;
+        const auto &U = svd.matrixU();
+        const auto &V = svd.matrixV();
+    //    M.diagonal()<< 1, 1, U.determinant()*V.determinant();
+        RHumanCam = U * V.transpose();
+        THumanCam = PNeck;
+//        Vector3d anglesBC = 180 / M_PI * RHumanCam.eulerAngles(0, 1, 2);
+    //    cout<<"Base -> Came XYZ: "<<angleBCX<< " " <<angleBCY <<" "<<angleBCZ <<endl;
+    //    cout<<"Base -> Came eulerAngles XYZ: "<<anglesBC.transpose()<<endl;
+        transformed = true;
+}
+    // get limbs length
     auto PWrist2 = Sk2.col(4);
     auto PElbow2 = Sk2.col(3);
     auto PShoulder2 = Sk2.col(2);
     auto PWrist1 = Sk1.col(4);
     auto PElbow1 = Sk1.col(3);
     auto PShoulder1 = Sk1.col(2);
-
     double upperL1 = (PShoulder1 - PElbow1).norm();
     double lowerL1 = (PWrist1 - PElbow1).norm();
-
     double upperL2 = (PShoulder2 - PElbow2).norm();
     double lowerL2 = (PWrist2 - PElbow2).norm();
 //    cout<<"upper limb length: "<<upperL1<<" "<<upperL2<<endl;
 //    cout<<"lower limb length: "<<lowerL1<<" "<<lowerL2<<endl;
 
-    if(countTF >= 5){
-        transformed = true;
-    }
 
     // translate sk1 from cam1 to cam2
     Sk1Cam2 = R12*(Sk1.colwise() - T12);
-//    Sk1Cam2 = RHumanCam*(Sk1Cam2.colwise() - THumanCam);
-//    Sk2 = RHumanCam*(Sk2.colwise()-THumanCam);
-
     // select target joints and plot test point on both frames
     for (int i=0; targetCount > i; i++) {
+//        cout<<"tagets: "<<target[i+1]<<endl;
         // PTarget: P11, P21 (shoulder) P12, P22 (elbow), P13, P23 (wrist)
         PTarget.middleCols(2*i,2) << Sk1Cam2.col(target[i+1]), Sk2.col(target[i+1]);
         AccTarget.middleRows(2*i,2) << Acc1(target[i+1]), Acc2(target[i+1]);
@@ -416,14 +440,9 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
         MyFilledCircle(*f2, cv::Point(int(pTestCam2(0)),int(pTestCam2(1))),Scalar( 0, 255, 0 ));
         Vector3d Ptest1 = Sk1.col(target[i+1]);
         Vector3d pTestCam1 = K1*(Ptest1/Ptest1(2));
-//        cout<<"K1: \n" <<K1<<endl;
-//        cout<<"P1 3D:\n"<<Ptest1<<endl;
-//        cout<<"p1 2D:\n"<<pTestCam1<<endl;
         MyFilledCircle(*f1, cv::Point(int(pTestCam1(0)),int(pTestCam1(1))),Scalar( 0, 255, 0 ));
     }
-//    cout<<"Accuracy: \n"<<AccTarget<<endl;
-//    cout<<"target joints: \n"<<PTarget<<endl;
-//    cout<<"accuracy: \n"<<AccTarget<<endl;
+
     L12.push_back((PTarget.col(3) - PTarget.col(1)).norm());
     L23.push_back((PTarget.col(5) - PTarget.col(3)).norm());
 //    cout<<"average measured length of elbow to wirst: "<<accumulate(L12.begin(),L12.end(),0.0)/L12.size()<<endl;
@@ -433,61 +452,108 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
     GNC.setupGNC(PTarget, AccTarget, L1, Lambda1, stepSize, 3);
     GNC.run(true, index);
 //        PEstimated = GNC.getEstimation();
-
-    // Get arm three points: P1 shoulder, P2 elbow, P3 wrist Vector3d
+    // Get arm three points: P1 wrist, P2 elbow, P3 shoulder Vector3d
     tie(P1, P2, P3) = GNC.getThreePointsEstimation();
 //    cout<<"Estimated limb length: "<<(P1-P2).norm()<<" "<<(P2-P3).norm()<<endl;
-//    cout<<"target point: \n"<<PTarget<<endl;
-//    cout<<"Estimated point 1: \n"<<P1<<endl;
-//    cout<<"Estimated point 2: \n"<<P2<<endl;
-//    cout<<"Estimated point 3: \n"<<P3<<endl;
+//    cout<<"target point: \n"<<target[0] << " "<<target[1] <<" " <<target[2]<< " " <<target[3]<<endl;
 
     // Get angles
-    Vector3d upperArm = P1 - P2;
-    Vector3d lowerArm = P3 - P2;
-    Vector3d neck2Shoulder = P1 - PNeck;
-    Vector3d neck2Midhip = PHip - PNeck;
-    angleArm = getAngleOfTwoVectors(&upperArm, &lowerArm);
-    {
-        // Shoulder frame
-        Vector3d ZShoulder = P1 - P2;
-        ZShoulder = ZShoulder/ZShoulder.norm();
-        Vector3d randomShoulderOnZY = P3 - P2;
-        randomShoulderOnZY = randomShoulderOnZY/randomShoulderOnZY.norm();
-        Vector3d YShoulder = ZShoulder.cross(randomShoulderOnZY);
-        Vector3d XShoulder = YShoulder.cross(ZShoulder);
-
-        // Base frame
-        Vector3d ZBase = PNeck - PHip;
-        ZBase = ZBase/ZBase.norm();
-        Vector3d YBase = PNeck - P1;
-        YBase = YBase/YBase.norm();
-        Vector3d XBase = YBase.cross(ZBase);
-//        cout<<"Shoulder XYZ: "<< XShoulder<<endl<<YShoulder<<endl<<ZShoulder<<endl;
-//        cout<<"Base XYZ: "<< XBase<<endl<<YBase<<endl<<ZBase<<endl;
-        MatrixXd Base_shoulder = XBase*(XShoulder.transpose()) + ZBase*(ZShoulder.transpose()) + YBase*(YShoulder.transpose()) ;
-        JacobiSVD<MatrixXd> svd_BS(Base_shoulder, ComputeThinU | ComputeThinV);
-        Matrix3d M_BS;
-        const auto& U_BS = svd_BS.matrixU();
-        const auto& V_BS = svd_BS.matrixV();
-        M_BS.diagonal()<< 1, 1, U_BS.determinant()*V_BS.determinant();
-//        auto RShoulderBase = U_BS*M_BS*V_BS.transpose();
-        auto RShoulderBase = U_BS*V_BS.transpose();
-        //0:roll(X), 1: pitch (Y), 2:yaw (Z)
-        angles_BS = Matrix3d(RShoulderBase).eulerAngles(2, 1, 0)*180/M_PI;
-        cout<< "Angles between Shoulder and Base: "<<angles_BS<<endl;
-        angleArmTorso = getAngleOfTwoVectors(&ZShoulder, &ZBase);
-        angleArmX = getAngleOfTwoVectors(&XShoulder, &XBase);
-        angleArmY = getAngleOfTwoVectors(&YShoulder, &YBase);
-        cout<<"angleArmTorso: "<<angleArmTorso<<endl;
-        cout<<"angleArmY: "<<angleArmY<<endl;
-        cout<<"angleArmX: "<<angleArmX<<endl;
+    // Shoulder frame
+//        Vector3d PShoulderCam2 = Sk2.col(2);
+//        Vector3d PElbowCam2 = Sk2.col(3);
+//        Vector3d PWristCam2 = Sk2.col(4);
+    Vector3d PShoulderCam2 = P3;
+    Vector3d PElbowCam2 = P2;
+    Vector3d PWristCam2 = P1;
+    Vector3d ZShoulder = PShoulderCam2 - PElbowCam2;
+    Vector3d lowerArm = PWristCam2 - PElbowCam2;
+    ZShoulder = ZShoulder/ZShoulder.norm();
+    lowerArm = lowerArm/lowerArm.norm();
+    Vector3d YShoulder = ZShoulder.cross(lowerArm);
+    angleArm = getAngleOfTwoVectors(ZShoulder, lowerArm);
+    auto angleShoulderOld = getAngleOfTwoVectors(YShoulder, YShoulderOld);
+    auto angleShoulderNew = getAngleOfTwoVectors(-YShoulder, YShoulderOld);
+    if(angleShoulderNew < angleShoulderOld) {
+        YShoulder = -YShoulder;
+    }
+    else{
+        YShoulderOld = YShoulder;
+    }
+    YShoulder = YShoulder/YShoulder.norm();
+    Vector3d XShoulder = YShoulder.cross(ZShoulder);
+    XShoulder = XShoulder/XShoulder.norm();
+    if (countTF<1){
+        YShoulderF0 = YShoulder;
+        ZShoulderF0 = ZShoulder;
+        XShoulderF0 = XShoulder;
     }
 
-//    cout<<"flexion angle: "<<angleArm<<endl;
+    // SVD: Shoulder = R*Shoulder_init
+    MatrixXd F0F1 = XShoulder*(XShoulderF0.transpose()) + YShoulder*(YShoulderF0.transpose()) +
+            ZShoulder*(ZShoulderF0.transpose());
+    JacobiSVD<MatrixXd> svd_f0f1(F0F1, ComputeFullU | ComputeFullV);
+    const auto& U_f0f1 = svd_f0f1.matrixU();
+    const auto& V_f0f1 = svd_f0f1.matrixV();
+    RShoulderF0F1 = U_f0f1*V_f0f1.transpose();
+    //0:roll(X), 1: pitch (Y), 2:yaw (Z)
+    angles_f0f1 = Matrix3d(RShoulderF0F1).eulerAngles(0, 1, 2)*180/M_PI;
+//    angleZ = atan2(RShoulderF0F1(1,0), RShoulderF0F1(0,0))*180/M_PI;
+//    angleShoulderX = getAngleOfTwoVectors(-ZShoulder, XBase);
+//    angleShoulderTorso = getAngleOfTwoVectors(-ZShoulder, -ZBase);
+////    cout<<"angle flexion: "<<angleArm<<endl;
+//    if (countTF<1){
+//        angles_f0f1_old = angles_f0f1;
+//    }
+//    if (angleZ<-90 || angleZ>90) {
+//        YShoulder = -YShoulder;
+//        YShoulderOld = YShoulder;
+//        XShoulder = YShoulder.cross(ZShoulder);
+//        XShoulder = XShoulder/XShoulder.norm();
+//        angleZ = angleZ<-90? angleZ + 180: angleZ-180;
+//    }
+
+    // Shoulder = R*Base -> S*B_T = R(B*B_T) -> (B*B_T)^(-1)*S*B_T = R
+    MatrixXd BS = XShoulder*(XBase.transpose()) + YShoulder*(YBase.transpose()) + ZShoulder*(ZBase.transpose());
+    // Base = R*Shoulder
+//    MatrixXd BS = XBase*(XShoulder.transpose()) + YBase*(YShoulder.transpose()) + ZBase*(ZShoulder.transpose());
+    JacobiSVD<MatrixXd> svd_BS(BS, ComputeFullU | ComputeFullV);
+//    Matrix3d M_BS;
+    const auto& U_BS = svd_BS.matrixU();
+    const auto& V_BS = svd_BS.matrixV();
+//    M.diagonal()<< 1, 1, U.determinant()*V.determinant();
+//    auto RShoudlerBase = U_BS*M*V.transpose();
+    RotationBaseShoulder = U_BS*V_BS.transpose();
+    thetaX = 180/M_PI*atan2(RotationBaseShoulder(2,1), RotationBaseShoulder(2,2));
+    thetaY = 180/M_PI*atan2(-RotationBaseShoulder(2,0),
+                            sqrt(pow(RotationBaseShoulder(2,1),2) + pow(RotationBaseShoulder(2,2),2)));
+    thetaZ = 180/M_PI*atan2(RotationBaseShoulder(1,0), RotationBaseShoulder(0,0));
+    angles_ShoulderBase = 180/M_PI*Matrix3d(RotationBaseShoulder).eulerAngles(0, 1, 2);
+//    if(countTF < 1){
+//        angles_SB_old = angles_ShoulderBase;
+//    }
+//    else{
+//        auto angles_disc = (angles_ShoulderBase - angles_SB_old).cwiseAbs(); //array().abs()
+//        cout<<angles_disc<<endl;
+//        if((angles_disc[0]>180)){
+//            angles_ShoulderBase[0] += (angles_SB_old.array().sign()[0])*360.0;
+//        }
+//        else if((angles_disc[1]>180)){
+//            angles_ShoulderBase[1] += (angles_SB_old.array().sign()[1])*360.0;
+//        }
+//        else if((angles_disc[2]>180)){
+//            angles_ShoulderBase[2] += (angles_SB_old.array().sign()[2])*360.0;
+//        }
+//        angles_SB_old = angles_ShoulderBase;
+//    }
+//    cout<<"angles from atan2: "<< thetaX <<" "<<thetaY <<" "<<thetaZ<<endl;
+    cout<<"angles X Y Z: "<<angles_ShoulderBase.transpose()<<endl;
+    cout<<"angle flexion: " << angleArm<<endl;
+
+    countTF ++;
+
     // Visulization
     if(*isDisplay){
-        // P1 on cam 1
+        // P1 on cam 1 Wrist
         PETranslated = (R12.transpose()*P1) + T12;
         PixelEstimated = K1*(PETranslated/PETranslated(2));
         MyFilledCircle(*f1, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
@@ -495,7 +561,7 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
         PixelEstimated = K2*(P1/P1(2));
         MyFilledCircle(*f2, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
 
-        // P2 on cam 1
+        // P2 on cam 1 Elbow
         PETranslated = (R12.transpose()*P2) + T12;
         PixelEstimated = K1*(PETranslated/PETranslated(2));
         MyFilledCircle(*f1, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
@@ -503,7 +569,7 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
         PixelEstimated = K2*(P2/P2(2));
         MyFilledCircle(*f2, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
 
-        // P3 on cam 1
+        // P3 on cam 1 Shoulder
         PETranslated = (R12.transpose()*P3) + T12;
         PixelEstimated = K1*(PETranslated/PETranslated(2));
         MyFilledCircle(*f1, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar( 0, 0, 255 ));
@@ -534,9 +600,93 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
         PETranslated = R12*(PTest12 - T12);
         PixelEstimated = K2*(PETranslated/PETranslated(2));
 //    MyFilledCircle(frame2, cv::Point(PixelEstimated(0),PixelEstimated(1)),Scalar(255,0,0));
+
+        // Drawing coordinates
+        // Shoulder frame
+        double lineLength = 0.3;
+        PETranslated= (R12.transpose()*P2) + T12;
+        PixelEstimated = K1*(PETranslated/PETranslated(2));
+        // Y axis on cam2
+        Vector3d LineEnd = lineLength*YShoulder + P2;
+        Vector3d PixelLineEnd = K2*(LineEnd/LineEnd(2));
+        Vector3d PixelLineStart = K2*(P2/P2(2));
+        line(*f2, cv::Point (int(PixelLineStart[0]), int(PixelLineStart[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(255, 0, 0), 5, LINE_8);
+        // Y axis on cam1
+        LineEnd = (R12.transpose()*LineEnd) + T12;
+        PixelLineEnd = K1*(LineEnd/LineEnd(2));
+        line(*f1, cv::Point (int(PixelEstimated[0]), int(PixelEstimated[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(255, 0, 0), 5, LINE_8);
+        // Z axis on cam2
+        LineEnd = lineLength*ZShoulder + P2;
+        PixelLineEnd = K2*(LineEnd/LineEnd(2));
+        line(*f2, cv::Point (int(PixelLineStart[0]), int(PixelLineStart[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(0, 255, 0), 5, LINE_8);
+        // Z axis on cam1
+        LineEnd = (R12.transpose()*LineEnd) + T12;
+        PixelLineEnd = K1*(LineEnd/LineEnd(2));
+        line(*f1, cv::Point (int(PixelEstimated[0]), int(PixelEstimated[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(0, 255, 0), 5, LINE_8);
+
+        LineEnd = lineLength*XShoulder + P2;
+        PixelLineEnd = K1*(LineEnd/LineEnd(2));
+        line(*f2, cv::Point (int(PixelLineStart[0]), int(PixelLineStart[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(0, 0, 255), 5, LINE_8);
+        LineEnd = (R12.transpose()*LineEnd) + T12;
+        PixelLineEnd = K1*(LineEnd/LineEnd(2));
+        line(*f1, cv::Point (int(PixelEstimated[0]), int(PixelEstimated[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(0, 0, 255), 5, LINE_8);
+
+        // Base frame
+        lineLength = 0.2;
+        auto PBase = Sk2.col(1);
+        auto PBaseCam1 = Sk1.col(1);
+
+        // Y axis on cam2
+        LineEnd = lineLength*YBase + PBase;
+        PixelLineEnd = K2*(LineEnd/LineEnd(2));
+        PixelLineStart = K2*(PBase/PBase(2));
+        auto PixelLineStartCam1 = K1*(PBaseCam1/PBaseCam1(2));
+        line(*f2, cv::Point (int(PixelLineStart[0]), int(PixelLineStart[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(100, 0, 0), 5, LINE_8);
+        // Y axis on cam1
+        LineEnd = (R12.transpose()*LineEnd) + T12;
+        PixelLineEnd = K1*(LineEnd/LineEnd(2));
+        line(*f1, cv::Point (int(PixelLineStartCam1[0]), int(PixelLineStartCam1[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(100, 0, 0), 5, LINE_8);
+        // Z axis on cam2
+        LineEnd = lineLength*ZBase + PBase;
+        PixelLineEnd = K2*(LineEnd/LineEnd(2));
+        line(*f2, cv::Point (int(PixelLineStart[0]), int(PixelLineStart[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(0, 100, 0), 5, LINE_8);
+        // Z axis on cam1
+        LineEnd = (R12.transpose()*LineEnd) + T12;
+        PixelLineEnd = K1*(LineEnd/LineEnd(2));
+        line(*f1, cv::Point (int(PixelLineStartCam1[0]), int(PixelLineStartCam1[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(0, 100, 0), 5, LINE_8);
+
+        LineEnd = lineLength*XBase + Sk2.col(1);
+        PixelLineEnd = K1*(LineEnd/LineEnd(2));
+        line(*f2, cv::Point (int(PixelLineStart[0]), int(PixelLineStart[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(0, 0, 100), 5, LINE_8);
+        LineEnd = (R12.transpose()*LineEnd) + T12;
+        PixelLineEnd = K1*(LineEnd/LineEnd(2));
+        line(*f1, cv::Point (int(PixelLineStartCam1[0]), int(PixelLineStartCam1[1])),
+             cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
+             Scalar(0, 0, 100), 5, LINE_8);
+
     }
-//    *f1 = frame1;
-//    *f2 = frame2;
 }
 
 
@@ -545,6 +695,7 @@ inline tuple<Vector3d, Vector3d> SkeletonMerger::getEstimation() {
 }
 
 inline tuple<Vector3d, Vector3d, Vector3d> SkeletonMerger::getThreeEstimation() {
+    // P1 wrist, P2 elbow, P3 shoulder
     return make_tuple(P1, P2, P3);
 }
 
@@ -692,7 +843,7 @@ int main(int argc, char** argv){
 //    int target[] = {3,7,6,5};
     int target[] = {3,4,3,2};
     double tagSize = 0.166; // 0.215
-    double constrainLength1 = 0.24, constrainLength2 = 0.27, lambda1 = 1000.0, lambda2 = 1000.0, stepSize = 0.01;
+    double constrainLength1 = 0.24, constrainLength2 = 0.27, lambda1 = 0.0, lambda2 = 0.0, stepSize = 0.01;
 
 //    SM.setTarget(target, constrainLength1, lambda1, stepSize, tagSize);
     SM.setThreeTargets(target, constrainLength1, constrainLength2, lambda1, lambda2, stepSize, tagSize);
@@ -701,6 +852,7 @@ int main(int argc, char** argv){
     Mat frame1, frame2, frameD1, frameD2, result;
     Matrix3d RHumanCam;
     Vector3d THumanCam;
+    vector<double> angles_x, angles_y, angles_z;
 
     if (!FLAGS_image and !FLAGS_demo){
         cout<<"video1: "<<FLAGS_video1<<endl;
@@ -748,7 +900,7 @@ int main(int argc, char** argv){
     else if(FLAGS_demo){
         context ctx;
         int WIDTH = 848, HEIGHT = 480;
-        fs::path saveDir = "/home/geriatronics/hao/skeleton_fusion/results/";
+        fs::path saveDir = FLAGS_saveDir;
         string colorSaveName = "color";
         string depthSaveName = "depth";
         vector<string> serials;
@@ -831,28 +983,33 @@ int main(int argc, char** argv){
             hconcat(colorMat1, colorMat2, colorResult);
             imshow("Two Color Cameras", colorResult);
 
-            Vector3d P1, P2, P3;
+            Vector3d P1, P2, P3, PWrist_base, PElbow_base, PShoulder_base;
 //            tie(P1, P2) = SM.getEstimation();
+            // P1 wrist, P2 elbow, P3 shoulder
             tie(P1, P2, P3) = SM.getThreeEstimation();
             bool isTransformed = SM.isTransformed();
             double l1 = (P1-P2).norm();
             double l2 = (P2-P3).norm();
-//            cout<<"predicted length1 : "<<l1<<" length2: "<< l2 <<endl;
+//            cout<<"predicted lower arm length : "<<l1<<" upperer length: "<< l2 <<endl;
             length1.push_back(l1);
 
 //            predictionTxt << P3(0) << " " << P3(1) << " " << P3(2)
 //                          << " " << P2(0) << " " <<P2(1) << " " <<P2(2)
 //                          << " " << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
             if(isTransformed){
-
                 tie(RHumanCam, THumanCam) = SM.getHumanCamTF();
-                P3 = RHumanCam*(P3 - THumanCam);
-                P2 = RHumanCam*(P2 - THumanCam);
-                P1 = RHumanCam*(P1 - THumanCam);
+                // P1 wrist, P2 elbow, P3 shoulder
+                PShoulder_base = RHumanCam*(P3 - THumanCam);
+                PElbow_base = RHumanCam*(P2 - THumanCam);
+                PWrist_base = RHumanCam*(P1 - THumanCam);
 
-                cout <<" "<< P3(0) << " " << P3(1) << " " << P3(2)
-                             << " " << P2(0) << " " <<P2(1) << " " <<P2(2)
-                             << " " << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
+//                cout << P3(0) << " " << P3(1) << " " << P3(2) << "\n"
+//                     << P2(0) << " " <<P2(1) << " " <<P2(2) <<"\n"
+//                     << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
+//
+//                cout << P3_base(0) << " " << P3_base(1) << " " << P3_base(2) << "\n"
+//                << P2_base(0) << " " <<P2_base(1) << " " <<P2_base(2) <<"\n"
+//                << P1_base(0) << " " <<P1_base(1) << " " <<P1_base(2)<<'\n';
             }
 
             if(FLAGS_save_images){
@@ -968,8 +1125,9 @@ int main(int argc, char** argv){
             imshow("Two Color Cameras", colorResult);
             if(!skDetected)
                 continue;
-            Vector3d P1, P2, P3;
+            Vector3d P1, P2, P3, PWrist_base, PElbow_base, PShoulder_base, PBase;
 //            tie(P1, P2) = SM.getEstimation();
+
             tie(P1, P2, P3) = SM.getThreeEstimation();
             bool isTransformed = SM.isTransformed();
             double l1 = (P1-P2).norm();
@@ -977,27 +1135,45 @@ int main(int argc, char** argv){
 //            cout<<"predicted length1 : "<<l1<<" length2: "<< l2 <<endl;
             length1.push_back(l1);
 
-            predictionTxt <<"Joints (Shoulder-Elbow-Wrist in rowwise):\n"
-            << P3(0) << " " << P3(1) << " " << P3(2) <<'\n'
-            << " " << P2(0) << " " <<P2(1) << " " <<P2(2) <<'\n'
-            << " " << P1(0) << " " <<P1(1) << " " <<P1(2) <<'\n';
-            predictionTxt <<"Angles predicted by SVD rotation matrix (Rz*Ry*Rx):\n" << SM.angles_BS.transpose()<<'\n';
-            predictionTxt <<"Angles calculated by acos (Z_shoulder and Z_base, Y_shoulder and Y_base, X_shoulder and X_base):\n"
-            << SM.angleArmTorso<<' ' << SM.angleArmY<<' ' << SM.angleArmX<<'\n';
-            predictionTxt<<"Flexion angle: "<<SM.angleArm <<'\n' <<'\n';
             if(isTransformed){
                 tie(RHumanCam, THumanCam) = SM.getHumanCamTF();
-                P3 = RHumanCam*(P3 - THumanCam);
-                P2 = RHumanCam*(P2 - THumanCam);
-                P1 = RHumanCam*(P1 - THumanCam);
+                // P1 wrist, P2 elbow, P3 shoulder
+                if(index==1){
+                    PBase = P3;
+                }
+                PShoulder_base = RHumanCam*(P3 - PBase);
+                PElbow_base = RHumanCam*(P2 - PBase);
+                PWrist_base = RHumanCam*(P1 - PBase);
 
-//                predictionTxt<< stamp <<" "<< P3(0) << " " << P3(1) << " " << P3(2)
-//                          << " " << P2(0) << " " <<P2(1) << " " <<P2(2)
-//                          << " " << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
-//                predictionTxt << stamp << " " <<-P3(0) << " " << -P3(2) << " " << - P3(1)
-//                              << " " << -P2(0) << " " << -P2(2) << " " << - P2(1)
-//                              << " " << -P1(0)<< " " << -P1(2) << " " << -P1(1) <<'\n';
+//                cout << P3(0) << " " << P3(1) << " " << P3(2) << "\n"
+//                     << P2(0) << " " <<P2(1) << " " <<P2(2) <<"\n"
+//                     << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
+//
+//                cout << PShoulder_base(0) << " " << PShoulder_base(1) << " " << PShoulder_base(2) << "\n"
+//                     << PElbow_base(0) << " " <<PElbow_base(1) << " " <<PElbow_base(2) <<"\n"
+//                     << PWrist_base(0) << " " <<PWrist_base(1) << " " <<PWrist_base(2)<<'\n';
             }
+
+            angles_x.push_back(SM.angles_ShoulderBase[0]);
+            angles_y.push_back(SM.angles_ShoulderBase[1]);
+            angles_z.push_back(SM.angles_ShoulderBase[2]);
+
+            predictionTxt << "frame: "<<index<<'\n';
+            predictionTxt <<"Joints (Shoulder-Elbow-Wrist in rowwise):\n"
+            << PShoulder_base(0) << " " << PShoulder_base(1) << " " << PShoulder_base(2) <<'\n'
+            << PElbow_base(0) << " " <<PElbow_base(1) << " " <<PElbow_base(2) <<'\n'
+            << PWrist_base(                                                                                                                                                                 0) << " " <<PWrist_base(1) << " " <<PWrist_base(2) <<'\n';
+//            predictionTxt <<"Angles predicted by SVD rotation matrix (Rz*Ry*Rx):\n" << SM.angleZ<<'\n';
+            predictionTxt <<"Rotation matrix (Shoulder = R*Base):\n"
+                          << SM.RotationBaseShoulder<<'\n';
+            predictionTxt <<"Rotate angles XYZ (Shoulder = R*Base):\n"
+                          << SM.angles_ShoulderBase.transpose()<<'\n';
+            predictionTxt <<"Rotation matrix (Shoulder = R*Shoulder0):\n"
+                          << SM.RShoulderF0F1<<'\n';
+            predictionTxt <<"Rotate angles XYZ (Shoulder = R*Shoulder0):\n"
+                          << SM.angles_f0f1.transpose()<<'\n';
+            predictionTxt<<"Flexion angle: "<<SM.angleArm <<'\n' <<'\n';
+
             string saveDir = fs::path(FLAGS_saveDir) / "output/" ;
             if(!fs::exists(saveDir)){
                 fs::create_directories(saveDir);
@@ -1013,6 +1189,14 @@ int main(int argc, char** argv){
     predictionTxt.close();
 
     // plot limb length over time
+//    vector<double> constrain1 (frameNumber, constrainLength1);
+//    plt::named_hist("Constrain length L_ew", constrain1);
+//    plt::show();
+//    plt::close();
+//    plt::plot(angles_x);
+//    plt::plot(angles_y);
+//    plt::plot(angles_z);
+//    plt::show();
 //    if(!FLAGS_demo){
 //        vector<double> constrain1 (frameNumber, constrainLength1);
 //        plt::named_hist("Constrain length L_ew", constrain1);
