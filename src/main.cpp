@@ -100,6 +100,7 @@ private:
     MatrixXd Sk1, Sk2, Sk1Cam2, Sk2Cam1, PTarget, PCam1, PCam2;
     Matrix3d RSum, R12, K1, K2, R21, RHumanCam;
     Vector3d TSum, T12, T21, P1, P2, P3, THumanCam, PNeck, PHip, YShoulderOld, XShoulderF0, YShoulderF0, ZShoulderF0;
+    Vector3d XCam, YCam, ZCam;
     vector<double> L12, L23;
     bool gotTrans;
     // tag detector
@@ -129,7 +130,7 @@ public:
     double getAngleOfTwoVectors(const Vector3d&, const Vector3d&);
 
     Vector3d angles_f0f1, angles_f0f1_old, ZBase, YBase, XBase, angles_ShoulderBase, PShoulder, angles_SB_old;
-    Matrix3d RotationBaseShoulder, RShoulderF0F1;
+    Matrix3d RotationBaseShoulder, RShoulderF0F1, RShoulderF0Cam;
     double angleArm, angleArmTorso, angleArmX, angleArmY, angleShoulderTorso, angleShoulderX, angleZ, thetaX, thetaY, thetaZ, thetaZ_;
 };
 
@@ -167,7 +168,8 @@ inline bool SkeletonMerger::isTransformed() const{
 }
 
 inline tuple<Matrix3d, Vector3d> SkeletonMerger::getHumanCamTF() {
-    return make_tuple(RHumanCam, THumanCam);
+//    return make_tuple(RHumanCam, THumanCam);
+    return make_tuple(RShoulderF0Cam.transpose(), THumanCam);
 }
 
 inline void SkeletonMerger::setTarget(int *t, const double& length, const double& lambda1, const double& delta, const double& size) {
@@ -367,36 +369,44 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
         YBase = ZBase.cross(XBase);
         YBase = YBase / YBase.norm();
 
-    //       cout<<"YHuman "<<YHumanCam.norm()<<endl;
-        Vector3d XCam = Eigen::Vector3d::UnitX();
-        Vector3d YCam = Eigen::Vector3d::UnitY();
-        Vector3d ZCam = Eigen::Vector3d::UnitZ();
+        XCam = Eigen::Vector3d::UnitX();
+        YCam = Eigen::Vector3d::UnitY();
+        ZCam = Eigen::Vector3d::UnitZ();
 
-        /*** For SVD: B = A*B_T, the rotation matrix is map B to A (A = R*B)
-        Vector3d XTest(0,0,-1);
-        Vector3d YTest(1, 0, 0);
-        Vector3d ZTest(0,-1,0);
-        MatrixXd BTest = XCam*(XTest.transpose()) + ZCam*(ZTest.transpose()) + YCam*(YTest.transpose()) ;
-        JacobiSVD<MatrixXd> svdTest(BTest, ComputeFullU | ComputeFullV);
-        const auto& UTest = svdTest.matrixU();
-        const auto& VTest = svdTest.matrixV();
-        Matrix3d RTest = UTest*VTest.transpose();
-        // index: 0, 1, 2 -> rotation order: x,y,z
-        // index: 2, 1, 0 -> rotation order: z,y,x
-        Vector3d anglesTest = 180/M_PI*RTest.eulerAngles(0, 1, 2);
-        Vector3d xCam = RTest*XTest;
-        Vector3d yCam = RTest*YTest;
-        Vector3d zCam = RTest*ZTest;
-    //    cout<<"rotated xCam: "<<xCam<<endl;
-    //    cout<<"original xCam: "<<XCam<<endl;
-    //    cout<<"rotated yCam: "<<yCam<<endl;
-    //    cout<<"original YCam: "<<YCam<<endl;
-    //    cout<<"rotated zCam: "<<zCam<<endl;
-    //    cout<<"original ZCam: "<<ZCam<<endl;
-    //    cout<< "angles test: "<<anglesTest[0]<<" "<<anglesTest[1]<<" "<<anglesTest[2]<<endl;
+        /*** For SVD: C = A*B_T, the rotation matrix is map B to A (A = R*B)
          ***/
+//        Vector3d XTest(0,0,-1);
+//        Vector3d YTest(1, 0, 0);
+//        Vector3d ZTest(0,-1,0);
+//////        MatrixXd BTest = XCam*(XTest.transpose()) + ZCam*(ZTest.transpose()) + YCam*(YTest.transpose()) ;
+//        MatrixXd BTest = XTest*(XCam.transpose()) + ZTest*(ZCam.transpose()) + YTest*(YCam.transpose()) ;
+//        JacobiSVD<MatrixXd> svdTest(BTest, ComputeFullU | ComputeFullV);
+//        const auto& UTest = svdTest.matrixU();
+//        const auto& VTest = svdTest.matrixV();
+//        Matrix3d RTest = UTest*VTest.transpose();
+//        // index: 0, 1, 2 -> rotation order: x,y,z
+//        // index: 2, 1, 0 -> rotation order: z,y,x
+//        Vector3d anglesTest = 180/M_PI*RTest.eulerAngles(0, 1, 2);
+//        Vector3d xTest = RTest*XCam;
+//        Vector3d yTest = RTest*YCam;
+//        Vector3d zTest = RTest*ZCam;
+//        cout<<"rotated xTest: "<<xTest<<endl;
+//        cout<<"original XTest: "<<XTest<<endl;
+//        cout<<"rotated yTest: "<<yTest<<endl;
+//        cout<<"original YTest: "<<YTest<<endl;
+//        cout<<"rotated zTest: "<<zTest<<endl;
+//        cout<<"original ZTest: "<<ZTest<<endl;
+//        Vector3d xNew = RTest.transpose()*XCam;
+//        Vector3d yNew = RTest.transpose()*YCam;
+//        Vector3d zNew = RTest.transpose()*ZCam;
+//        cout<<"new xNew: "<<xNew<<endl;
+//        cout<<"new yNew: "<<yNew<<endl;
+//        cout<<"new zNew: "<<zNew<<endl;
+    //    cout<< "angles test: "<<anglesTest[0]<<" "<<anglesTest[1]<<" "<<anglesTest[2]<<endl;
+
         // Base= R*Cam
 //        MatrixXd B = XBase * (XCam.transpose()) + ZBase * (ZCam.transpose()) + YBase * (YCam.transpose());
+        // Cam =R*Base, a Point A at cam frame, A_base = R*A
         MatrixXd B = XCam * (XBase.transpose()) + ZCam * (ZBase.transpose()) + YCam * (YBase.transpose());
         JacobiSVD<MatrixXd> svd(B, ComputeFullU | ComputeFullV);
         Matrix3d M;
@@ -482,35 +492,59 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
     YShoulder = YShoulder/YShoulder.norm();
     Vector3d XShoulder = YShoulder.cross(ZShoulder);
     XShoulder = XShoulder/XShoulder.norm();
-    if (countTF<1){
+    if (countTF<=5){
         YShoulderF0 = YShoulder;
         ZShoulderF0 = ZShoulder;
         XShoulderF0 = XShoulder;
+
+        // SVD: Shoulder = R*Cam
+        MatrixXd F0Cam = XShoulderF0*(XCam.transpose()) + YShoulderF0*(YCam.transpose()) +
+                         ZShoulderF0*(ZCam.transpose());
+        JacobiSVD<MatrixXd> svd_f0Cam(F0Cam, ComputeFullU | ComputeFullV);
+        const auto& U_f0Cam = svd_f0Cam.matrixU();
+        const auto& V_f0Cam = svd_f0Cam.matrixV();
+        RShoulderF0Cam = U_f0Cam*V_f0Cam.transpose();
     }
 
-    // SVD: Shoulder = R*Shoulder_init
-    MatrixXd F0F1 = XShoulder*(XShoulderF0.transpose()) + YShoulder*(YShoulderF0.transpose()) +
-            ZShoulder*(ZShoulderF0.transpose());
+
+
+    auto XF0 = RShoulderF0Cam.transpose()*XShoulderF0;
+    auto YF0 = RShoulderF0Cam.transpose()*YShoulderF0;
+    auto ZF0 = RShoulderF0Cam.transpose()*ZShoulderF0;
+
+    auto XF1 = RShoulderF0Cam.transpose()*XShoulder;
+    auto YF1 = RShoulderF0Cam.transpose()*YShoulder;
+    auto ZF1 = RShoulderF0Cam.transpose()*ZShoulder;
+
+    cout<<"X Shoulder in Frame 0: "<<XF1<<endl;
+    cout<<"Y Shoulder in Frame 0: "<<YF1<<endl;
+    cout<<"Z Shoulder in Frame 0: "<<ZF1<<endl;
+
+    MatrixXd F0F1 = XF1*(XF0.transpose()) + YF1*(YF0.transpose()) + ZF1*(ZF0.transpose());
+//    MatrixXd F0F1 = XF0*(XF1.transpose()) + YF0*(YF1.transpose()) + ZF0*(ZF1.transpose());
     JacobiSVD<MatrixXd> svd_f0f1(F0F1, ComputeFullU | ComputeFullV);
     const auto& U_f0f1 = svd_f0f1.matrixU();
     const auto& V_f0f1 = svd_f0f1.matrixV();
     RShoulderF0F1 = U_f0f1*V_f0f1.transpose();
     //0:roll(X), 1: pitch (Y), 2:yaw (Z)
     angles_f0f1 = Matrix3d(RShoulderF0F1).eulerAngles(0, 1, 2)*180/M_PI;
-//    angleZ = atan2(RShoulderF0F1(1,0), RShoulderF0F1(0,0))*180/M_PI;
-//    angleShoulderX = getAngleOfTwoVectors(-ZShoulder, XBase);
-//    angleShoulderTorso = getAngleOfTwoVectors(-ZShoulder, -ZBase);
-////    cout<<"angle flexion: "<<angleArm<<endl;
-//    if (countTF<1){
-//        angles_f0f1_old = angles_f0f1;
-//    }
-//    if (angleZ<-90 || angleZ>90) {
-//        YShoulder = -YShoulder;
-//        YShoulderOld = YShoulder;
-//        XShoulder = YShoulder.cross(ZShoulder);
-//        XShoulder = XShoulder/XShoulder.norm();
-//        angleZ = angleZ<-90? angleZ + 180: angleZ-180;
-//    }
+    if(countTF < 1){
+        angles_SB_old = angles_f0f1;
+    }
+    else{
+        auto angles_disc = (angles_f0f1 - angles_SB_old).cwiseAbs(); //array().abs()
+        cout<<angles_disc<<endl;
+        if((angles_disc[0]>180)){
+            angles_f0f1[0] += (angles_SB_old.array().sign()[0])*360.0;
+        }
+        else if((angles_disc[1]>180)){
+            angles_f0f1[1] += (angles_SB_old.array().sign()[1])*360.0;
+        }
+        else if((angles_disc[2]>180)){
+            angles_f0f1[2] += (angles_SB_old.array().sign()[2])*360.0;
+        }
+        angles_SB_old = angles_ShoulderBase;
+    }
 
     // Shoulder = R*Base -> S*B_T = R(B*B_T) -> (B*B_T)^(-1)*S*B_T = R
     MatrixXd BS = XShoulder*(XBase.transpose()) + YShoulder*(YBase.transpose()) + ZShoulder*(ZBase.transpose());
@@ -546,6 +580,7 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
 //        angles_SB_old = angles_ShoulderBase;
 //    }
 //    cout<<"angles from atan2: "<< thetaX <<" "<<thetaY <<" "<<thetaZ<<endl;
+    cout<<"angles X Y Z: "<<angles_f0f1.transpose()<<endl;
     cout<<"angles X Y Z: "<<angles_ShoulderBase.transpose()<<endl;
     cout<<"angle flexion: " << angleArm<<endl;
 
@@ -850,8 +885,8 @@ int main(int argc, char** argv){
     int index = 1;
     vector<double> length1, length2;
     Mat frame1, frame2, frameD1, frameD2, result;
-    Matrix3d RHumanCam;
-    Vector3d THumanCam;
+    Matrix3d RCam2Human;
+    Vector3d THuman2Cam;
     vector<double> angles_x, angles_y, angles_z;
 
     if (!FLAGS_image and !FLAGS_demo){
@@ -997,11 +1032,11 @@ int main(int argc, char** argv){
 //                          << " " << P2(0) << " " <<P2(1) << " " <<P2(2)
 //                          << " " << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
             if(isTransformed){
-                tie(RHumanCam, THumanCam) = SM.getHumanCamTF();
+                tie(RCam2Human, THuman2Cam) = SM.getHumanCamTF();
                 // P1 wrist, P2 elbow, P3 shoulder
-                PShoulder_base = RHumanCam*(P3 - THumanCam);
-                PElbow_base = RHumanCam*(P2 - THumanCam);
-                PWrist_base = RHumanCam*(P1 - THumanCam);
+                PShoulder_base = RCam2Human*(P3 - P3);
+                PElbow_base = RCam2Human*(P2 - P3);
+                PWrist_base = RCam2Human*(P1 - P3);
 
 //                cout << P3(0) << " " << P3(1) << " " << P3(2) << "\n"
 //                     << P2(0) << " " <<P2(1) << " " <<P2(2) <<"\n"
@@ -1136,38 +1171,39 @@ int main(int argc, char** argv){
             length1.push_back(l1);
 
             if(isTransformed){
-                tie(RHumanCam, THumanCam) = SM.getHumanCamTF();
+                tie(RCam2Human, THuman2Cam) = SM.getHumanCamTF();
                 // P1 wrist, P2 elbow, P3 shoulder
                 if(index==1){
                     PBase = P3;
                 }
-                PShoulder_base = RHumanCam*(P3 - PBase);
-                PElbow_base = RHumanCam*(P2 - PBase);
-                PWrist_base = RHumanCam*(P1 - PBase);
+                PShoulder_base = RCam2Human*(P3 - P3);
+                PElbow_base = RCam2Human*(P2 - P3);
+                PWrist_base = RCam2Human*(P1 - P3);
 
 //                cout << P3(0) << " " << P3(1) << " " << P3(2) << "\n"
 //                     << P2(0) << " " <<P2(1) << " " <<P2(2) <<"\n"
 //                     << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
 //
-//                cout << PShoulder_base(0) << " " << PShoulder_base(1) << " " << PShoulder_base(2) << "\n"
-//                     << PElbow_base(0) << " " <<PElbow_base(1) << " " <<PElbow_base(2) <<"\n"
-//                     << PWrist_base(0) << " " <<PWrist_base(1) << " " <<PWrist_base(2)<<'\n';
+                cout << PShoulder_base(0) << " " << PShoulder_base(1) << " " << PShoulder_base(2) << "\n"
+                     << PElbow_base(0) << " " <<PElbow_base(1) << " " <<PElbow_base(2) <<"\n"
+                     << PWrist_base(0) << " " <<PWrist_base(1) << " " <<PWrist_base(2)<<'\n';
             }
 
             angles_x.push_back(SM.angles_ShoulderBase[0]);
             angles_y.push_back(SM.angles_ShoulderBase[1]);
             angles_z.push_back(SM.angles_ShoulderBase[2]);
-
+            if(index<=5)
+                continue;
             predictionTxt << "frame: "<<index<<'\n';
             predictionTxt <<"Joints (Shoulder-Elbow-Wrist in rowwise):\n"
             << PShoulder_base(0) << " " << PShoulder_base(1) << " " << PShoulder_base(2) <<'\n'
             << PElbow_base(0) << " " <<PElbow_base(1) << " " <<PElbow_base(2) <<'\n'
-            << PWrist_base(                                                                                                                                                                 0) << " " <<PWrist_base(1) << " " <<PWrist_base(2) <<'\n';
+            << PWrist_base(0) << " " <<PWrist_base(1) << " " <<PWrist_base(2) <<'\n';
 //            predictionTxt <<"Angles predicted by SVD rotation matrix (Rz*Ry*Rx):\n" << SM.angleZ<<'\n';
-            predictionTxt <<"Rotation matrix (Shoulder = R*Base):\n"
-                          << SM.RotationBaseShoulder<<'\n';
-            predictionTxt <<"Rotate angles XYZ (Shoulder = R*Base):\n"
-                          << SM.angles_ShoulderBase.transpose()<<'\n';
+//            predictionTxt <<"Rotation matrix (Shoulder = R*Base):\n"
+//                          << SM.RotationBaseShoulder<<'\n';
+//            predictionTxt <<"Rotate angles XYZ (Shoulder = R*Base):\n"
+//                          << SM.angles_ShoulderBase.transpose()<<'\n';
             predictionTxt <<"Rotation matrix (Shoulder = R*Shoulder0):\n"
                           << SM.RShoulderF0F1<<'\n';
             predictionTxt <<"Rotate angles XYZ (Shoulder = R*Shoulder0):\n"
