@@ -39,19 +39,19 @@ DEFINE_bool(save_images, true, "save all images");
 //              "Give the first video file path");
 //DEFINE_string(depthDir2, "/media/dataset/translation/results_medical2/845112070795/depth/",
 //              "Give the second video file path");
-DEFINE_string(colorDir1, "/home/geriatronics/hao/skeleton_fusion/results_slow_up/213322071238/original/",  // results_dailytask results_medical
+DEFINE_string(colorDir1, "/home/geriatronics/hao/skeleton_fusion/results_slow_push_front/213322071238/original/",  // results_dailytask results_medical
               "Give the first video file path");
-DEFINE_string(colorDir2, "/home/geriatronics/hao/skeleton_fusion/results_slow_up/934222072657/original/", // results_test results_daily1
+DEFINE_string(colorDir2, "/home/geriatronics/hao/skeleton_fusion/results_slow_push_front/934222072657/original/", // results_test results_daily1
               "Give the second video file path");
-DEFINE_string(depthDir1, "/home/geriatronics/hao/skeleton_fusion/results_slow_up/213322071238/depth/",
+DEFINE_string(depthDir1, "/home/geriatronics/hao/skeleton_fusion/results_slow_push_front/213322071238/depth/",
               "Give the first video file path");
-DEFINE_string(depthDir2, "/home/geriatronics/hao/skeleton_fusion/results_slow_up/934222072657/depth/",
+DEFINE_string(depthDir2, "/home/geriatronics/hao/skeleton_fusion/results_slow_push_front/934222072657/depth/",
               "Give the second video file path");
 
 
 DEFINE_string(tagCode, "36h11", "Give the tag code to choose tag family");
 DEFINE_int32(TagID, 89, "Give the Tag ID to calculate the extrinsic parameters, hand marker: 89, table left: 54, table right: 25");
-DEFINE_string(saveDir, "/home/geriatronics/hao/skeleton_fusion/results_slow_up/",
+DEFINE_string(saveDir, "/home/geriatronics/hao/skeleton_fusion/results_slow_push_front/",
               "Give the save path");
 
 double standardRad(double t) {
@@ -169,7 +169,7 @@ inline bool SkeletonMerger::isTransformed() const{
 
 inline tuple<Matrix3d, Vector3d> SkeletonMerger::getHumanCamTF() {
 //    return make_tuple(RHumanCam, THumanCam);
-    return make_tuple(RShoulderF0Cam.transpose(), THumanCam);
+    return make_tuple(RHumanCam.transpose(), THumanCam);
 }
 
 inline void SkeletonMerger::setTarget(int *t, const double& length, const double& lambda1, const double& delta, const double& size) {
@@ -354,8 +354,7 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
     auto AHip = Acc2(8);
     auto AShoulder = Acc2(2);
     // initialize TF and limbs length Base Frame
-
-    if (countTF < 1) {
+    if (countTF < 5) {
         PNeck = Sk2.col(1);
         PHip = Sk2.col(8);
         PShoulder = Sk2.col(2);
@@ -405,9 +404,9 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
     //    cout<< "angles test: "<<anglesTest[0]<<" "<<anglesTest[1]<<" "<<anglesTest[2]<<endl;
 
         // Base= R*Cam
-//        MatrixXd B = XBase * (XCam.transpose()) + ZBase * (ZCam.transpose()) + YBase * (YCam.transpose());
+        MatrixXd B = XBase * (XCam.transpose()) + ZBase * (ZCam.transpose()) + YBase * (YCam.transpose());
         // Cam =R*Base, a Point A at cam frame, A_base = R*A
-        MatrixXd B = XCam * (XBase.transpose()) + ZCam * (ZBase.transpose()) + YCam * (YBase.transpose());
+//        MatrixXd B = XCam * (XBase.transpose()) + ZCam * (ZBase.transpose()) + YCam * (YBase.transpose());
         JacobiSVD<MatrixXd> svd(B, ComputeFullU | ComputeFullV);
         Matrix3d M;
         const auto &U = svd.matrixU();
@@ -455,8 +454,7 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
 
     L12.push_back((PTarget.col(3) - PTarget.col(1)).norm());
     L23.push_back((PTarget.col(5) - PTarget.col(3)).norm());
-//    cout<<"average measured length of elbow to wirst: "<<accumulate(L12.begin(),L12.end(),0.0)/L12.size()<<endl;
-//    cout<<"average measured length of shoulder to elbow: "<<accumulate(L23.begin(),L23.end(),0.0)/L23.size()<<endl;
+
     // GNC-MC
     // length: contrain; lambda: loose the contrain; stepSize: convergence
     GNC.setupGNC(PTarget, AccTarget, L1, Lambda1, stepSize, 3);
@@ -479,77 +477,88 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
     Vector3d lowerArm = PWristCam2 - PElbowCam2;
     ZShoulder = ZShoulder/ZShoulder.norm();
     lowerArm = lowerArm/lowerArm.norm();
-    Vector3d YShoulder = ZShoulder.cross(lowerArm);
+    Vector3d XShoulder = lowerArm.cross(ZShoulder);
     angleArm = getAngleOfTwoVectors(ZShoulder, lowerArm);
-    auto angleShoulderOld = getAngleOfTwoVectors(YShoulder, YShoulderOld);
-    auto angleShoulderNew = getAngleOfTwoVectors(-YShoulder, YShoulderOld);
-    if(angleShoulderNew < angleShoulderOld) {
-        YShoulder = -YShoulder;
-    }
-    else{
-        YShoulderOld = YShoulder;
-    }
-    YShoulder = YShoulder/YShoulder.norm();
-    Vector3d XShoulder = YShoulder.cross(ZShoulder);
+//    auto angleShoulderOld = getAngleOfTwoVectors(YShoulder, YShoulderOld);
+//    auto angleShoulderNew = getAngleOfTwoVectors(-YShoulder, YShoulderOld);
+//    if(angleShoulderNew < angleShoulderOld) {
+//        YShoulder = -YShoulder;
+//    }
+//    else{
+//        YShoulderOld = YShoulder;
+//    }
     XShoulder = XShoulder/XShoulder.norm();
+//    Vector3d XShoulder = YShoulder.cross(ZShoulder);
+//    XShoulder = XShoulder/XShoulder.norm();
+
+    Vector3d YShoulder = ZShoulder.cross(XShoulder);
+    YShoulder = YShoulder/YShoulder.norm();
+
     if (countTF<=5){
         YShoulderF0 = YShoulder;
         ZShoulderF0 = ZShoulder;
         XShoulderF0 = XShoulder;
-
-        // SVD: Shoulder = R*Cam
-        MatrixXd F0Cam = XShoulderF0*(XCam.transpose()) + YShoulderF0*(YCam.transpose()) +
-                         ZShoulderF0*(ZCam.transpose());
-        JacobiSVD<MatrixXd> svd_f0Cam(F0Cam, ComputeFullU | ComputeFullV);
-        const auto& U_f0Cam = svd_f0Cam.matrixU();
-        const auto& V_f0Cam = svd_f0Cam.matrixV();
-        RShoulderF0Cam = U_f0Cam*V_f0Cam.transpose();
     }
 
+//    auto XF0 = RShoulderF0Cam.transpose()*XShoulderF0;
+//    auto YF0 = RShoulderF0Cam.transpose()*YShoulderF0;
+//    auto ZF0 = RShoulderF0Cam.transpose()*ZShoulderF0;
+//
+//    auto XF1 = RShoulderF0Cam.transpose()*XShoulder;
+//    auto YF1 = RShoulderF0Cam.transpose()*YShoulder;
+//    auto ZF1 = RShoulderF0Cam.transpose()*ZShoulder;
 
+//    cout<<"X Shoulder in Frame 0: "<<XF1<<endl;
+//    cout<<"Y Shoulder in Frame 0: "<<YF1<<endl;
+//    cout<<"Z Shoulder in Frame 0: "<<ZF1<<endl;
 
-    auto XF0 = RShoulderF0Cam.transpose()*XShoulderF0;
-    auto YF0 = RShoulderF0Cam.transpose()*YShoulderF0;
-    auto ZF0 = RShoulderF0Cam.transpose()*ZShoulderF0;
+//    MatrixXd F0F1 = XF1*(XF0.transpose()) + YF1*(YF0.transpose()) + ZF1*(ZF0.transpose());
+////    MatrixXd F0F1 = XF0*(XF1.transpose()) + YF0*(YF1.transpose()) + ZF0*(ZF1.transpose());
+//    JacobiSVD<MatrixXd> svd_f0f1(F0F1, ComputeFullU | ComputeFullV);
+//    const auto& U_f0f1 = svd_f0f1.matrixU();
+//    const auto& V_f0f1 = svd_f0f1.matrixV();
+//    RShoulderF0F1 = U_f0f1*V_f0f1.transpose();
+//    //0:roll(X), 1: pitch (Y), 2:yaw (Z)
+//    angles_f0f1 = Matrix3d(RShoulderF0F1).eulerAngles(0, 1, 2)*180/M_PI;
+//    angles_f0f1 = Matrix3d(RShoulderF0F1).eulerAngles(2, 1, 0)*180/M_PI;
+//    cout<<"F0_X: "<<XF0.transpose()<<endl;
+//    cout<<"F1_X: "<<XF1.transpose()<<endl;
+//    cout<<"R*F0_X"<<(RShoulderF0F1*XF0).transpose()<<endl;
+//    cout<<"R*F0_X"<<(XF0.transpose()*RShoulderF0F1)<<endl;
+//    if(countTF < 1){
+//        angles_SB_old = angles_f0f1;
+//    }
+//    else{
+//        auto angles_disc = (angles_f0f1 - angles_SB_old).cwiseAbs(); //array().abs()
+//        cout<<angles_disc<<endl;
+//        if((angles_disc[0]>180)){
+//            angles_f0f1[0] += (angles_SB_old.array().sign()[0])*360.0;
+//        }
+//        else if((angles_disc[1]>180)){
+//            angles_f0f1[1] += (angles_SB_old.array().sign()[1])*360.0;
+//        }
+//        else if((angles_disc[2]>180)){
+//            angles_f0f1[2] += (angles_SB_old.array().sign()[2])*360.0;
+//        }
+//        angles_SB_old = angles_ShoulderBase;
+//    }
+    auto XBase_b = RHumanCam.transpose()*XBase;
+    auto YBase_b = RHumanCam.transpose()*YBase;
+    auto ZBase_b = RHumanCam.transpose()*ZBase;
+    cout<<"XBase_b: "<<XBase_b.transpose()<<endl;
+    cout<<"YBase_b: "<<YBase_b.transpose()<<endl;
+    cout<<"ZBase_b: "<<ZBase_b.transpose()<<endl;
 
-    auto XF1 = RShoulderF0Cam.transpose()*XShoulder;
-    auto YF1 = RShoulderF0Cam.transpose()*YShoulder;
-    auto ZF1 = RShoulderF0Cam.transpose()*ZShoulder;
+    auto XF1_b = RHumanCam.transpose()*XShoulder;
+    auto YF1_b = RHumanCam.transpose()*YShoulder;
+    auto ZF1_b = RHumanCam.transpose()*ZShoulder;
 
-    cout<<"X Shoulder in Frame 0: "<<XF1<<endl;
-    cout<<"Y Shoulder in Frame 0: "<<YF1<<endl;
-    cout<<"Z Shoulder in Frame 0: "<<ZF1<<endl;
-
-    MatrixXd F0F1 = XF1*(XF0.transpose()) + YF1*(YF0.transpose()) + ZF1*(ZF0.transpose());
-//    MatrixXd F0F1 = XF0*(XF1.transpose()) + YF0*(YF1.transpose()) + ZF0*(ZF1.transpose());
-    JacobiSVD<MatrixXd> svd_f0f1(F0F1, ComputeFullU | ComputeFullV);
-    const auto& U_f0f1 = svd_f0f1.matrixU();
-    const auto& V_f0f1 = svd_f0f1.matrixV();
-    RShoulderF0F1 = U_f0f1*V_f0f1.transpose();
-    //0:roll(X), 1: pitch (Y), 2:yaw (Z)
-    angles_f0f1 = Matrix3d(RShoulderF0F1).eulerAngles(0, 1, 2)*180/M_PI;
-    if(countTF < 1){
-        angles_SB_old = angles_f0f1;
-    }
-    else{
-        auto angles_disc = (angles_f0f1 - angles_SB_old).cwiseAbs(); //array().abs()
-        cout<<angles_disc<<endl;
-        if((angles_disc[0]>180)){
-            angles_f0f1[0] += (angles_SB_old.array().sign()[0])*360.0;
-        }
-        else if((angles_disc[1]>180)){
-            angles_f0f1[1] += (angles_SB_old.array().sign()[1])*360.0;
-        }
-        else if((angles_disc[2]>180)){
-            angles_f0f1[2] += (angles_SB_old.array().sign()[2])*360.0;
-        }
-        angles_SB_old = angles_ShoulderBase;
-    }
+    cout<<"XF1_b: "<<XF1_b.transpose()<<endl;
+    cout<<"YF1_b: "<<YF1_b.transpose()<<endl;
+    cout<<"ZF1_b: "<<ZF1_b.transpose()<<endl;
 
     // Shoulder = R*Base -> S*B_T = R(B*B_T) -> (B*B_T)^(-1)*S*B_T = R
-    MatrixXd BS = XShoulder*(XBase.transpose()) + YShoulder*(YBase.transpose()) + ZShoulder*(ZBase.transpose());
-    // Base = R*Shoulder
-//    MatrixXd BS = XBase*(XShoulder.transpose()) + YBase*(YShoulder.transpose()) + ZBase*(ZShoulder.transpose());
+    MatrixXd BS = XF1_b*(XBase_b.transpose()) + YF1_b*(YBase_b.transpose()) + ZF1_b*(ZBase_b.transpose());
     JacobiSVD<MatrixXd> svd_BS(BS, ComputeFullU | ComputeFullV);
 //    Matrix3d M_BS;
     const auto& U_BS = svd_BS.matrixU();
@@ -557,10 +566,11 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
 //    M.diagonal()<< 1, 1, U.determinant()*V.determinant();
 //    auto RShoudlerBase = U_BS*M*V.transpose();
     RotationBaseShoulder = U_BS*V_BS.transpose();
-    thetaX = 180/M_PI*atan2(RotationBaseShoulder(2,1), RotationBaseShoulder(2,2));
-    thetaY = 180/M_PI*atan2(-RotationBaseShoulder(2,0),
-                            sqrt(pow(RotationBaseShoulder(2,1),2) + pow(RotationBaseShoulder(2,2),2)));
-    thetaZ = 180/M_PI*atan2(RotationBaseShoulder(1,0), RotationBaseShoulder(0,0));
+    cout<<"R determinant: " <<RotationBaseShoulder.determinant()<<endl;
+//    thetaX = 180/M_PI*atan2(RotationBaseShoulder(2,1), RotationBaseShoulder(2,2));
+//    thetaY = 180/M_PI*atan2(-RotationBaseShoulder(2,0),
+//                            sqrt(pow(RotationBaseShoulder(2,1),2) + pow(RotationBaseShoulder(2,2),2)));
+//    thetaZ = 180/M_PI*atan2(RotationBaseShoulder(1,0), RotationBaseShoulder(0,0));
     angles_ShoulderBase = 180/M_PI*Matrix3d(RotationBaseShoulder).eulerAngles(0, 1, 2);
 //    if(countTF < 1){
 //        angles_SB_old = angles_ShoulderBase;
@@ -580,9 +590,12 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
 //        angles_SB_old = angles_ShoulderBase;
 //    }
 //    cout<<"angles from atan2: "<< thetaX <<" "<<thetaY <<" "<<thetaZ<<endl;
-    cout<<"angles X Y Z: "<<angles_f0f1.transpose()<<endl;
+//    cout<<"roation matrix: \n"<<RShoulderF0F1<<endl;
+//    cout<<"angles X Y Z: "<<angles_f0f1[2]<<" "<<angles_f0f1[1]<<" "<<angles_f0f1[0]<<endl;
+
+//    cout<<"roation matrix: \n"<<RotationBaseShoulder<<endl;
     cout<<"angles X Y Z: "<<angles_ShoulderBase.transpose()<<endl;
-    cout<<"angle flexion: " << angleArm<<endl;
+//    cout<<"angle flexion: " << angleArm<<endl;
 
     countTF ++;
 
@@ -667,11 +680,13 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
              cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
              Scalar(0, 255, 0), 5, LINE_8);
 
+        // X axis on cam2
         LineEnd = lineLength*XShoulder + P2;
         PixelLineEnd = K1*(LineEnd/LineEnd(2));
         line(*f2, cv::Point (int(PixelLineStart[0]), int(PixelLineStart[1])),
              cv::Point(int(PixelLineEnd[0]), int(PixelLineEnd[1])),
              Scalar(0, 0, 255), 5, LINE_8);
+        // X axis on cam1
         LineEnd = (R12.transpose()*LineEnd) + T12;
         PixelLineEnd = K1*(LineEnd/LineEnd(2));
         line(*f1, cv::Point (int(PixelEstimated[0]), int(PixelEstimated[1])),
@@ -1184,32 +1199,47 @@ int main(int argc, char** argv){
 //                     << P2(0) << " " <<P2(1) << " " <<P2(2) <<"\n"
 //                     << P1(0) << " " <<P1(1) << " " <<P1(2)<<'\n';
 //
-                cout << PShoulder_base(0) << " " << PShoulder_base(1) << " " << PShoulder_base(2) << "\n"
-                     << PElbow_base(0) << " " <<PElbow_base(1) << " " <<PElbow_base(2) <<"\n"
-                     << PWrist_base(0) << " " <<PWrist_base(1) << " " <<PWrist_base(2)<<'\n';
+//                cout << PShoulder_base(0) << " " << PShoulder_base(1) << " " << PShoulder_base(2) << "\n"
+//                     << PElbow_base(0) << " " <<PElbow_base(1) << " " <<PElbow_base(2) <<"\n"
+//                     << PWrist_base(0) << " " <<PWrist_base(1) << " " <<PWrist_base(2)<<'\n';
             }
 
             angles_x.push_back(SM.angles_ShoulderBase[0]);
             angles_y.push_back(SM.angles_ShoulderBase[1]);
             angles_z.push_back(SM.angles_ShoulderBase[2]);
-            if(index<=5)
-                continue;
-            predictionTxt << "frame: "<<index<<'\n';
-            predictionTxt <<"Joints (Shoulder-Elbow-Wrist in rowwise):\n"
-            << PShoulder_base(0) << " " << PShoulder_base(1) << " " << PShoulder_base(2) <<'\n'
-            << PElbow_base(0) << " " <<PElbow_base(1) << " " <<PElbow_base(2) <<'\n'
-            << PWrist_base(0) << " " <<PWrist_base(1) << " " <<PWrist_base(2) <<'\n';
-//            predictionTxt <<"Angles predicted by SVD rotation matrix (Rz*Ry*Rx):\n" << SM.angleZ<<'\n';
-//            predictionTxt <<"Rotation matrix (Shoulder = R*Base):\n"
-//                          << SM.RotationBaseShoulder<<'\n';
-//            predictionTxt <<"Rotate angles XYZ (Shoulder = R*Base):\n"
-//                          << SM.angles_ShoulderBase.transpose()<<'\n';
-            predictionTxt <<"Rotation matrix (Shoulder = R*Shoulder0):\n"
-                          << SM.RShoulderF0F1<<'\n';
-            predictionTxt <<"Rotate angles XYZ (Shoulder = R*Shoulder0):\n"
-                          << SM.angles_f0f1.transpose()<<'\n';
-            predictionTxt<<"Flexion angle: "<<SM.angleArm <<'\n' <<'\n';
+            if(index>=5) {
+                predictionTxt << "frame: " << index << '\n';
+                predictionTxt << "Joints (Shoulder-Elbow-Wrist in rowwise):\n"
+                              << PShoulder_base(0) << " " << PShoulder_base(1) << " " << PShoulder_base(2) << '\n'
+                              << PElbow_base(0) << " " << PElbow_base(1) << " " << PElbow_base(2) << '\n'
+                              << PWrist_base(0) << " " << PWrist_base(1) << " " << PWrist_base(2) << '\n';
+                //            predictionTxt <<"Angles predicted by SVD rotation matrix (Rz*Ry*Rx):\n" << SM.angleZ<<'\n';
+                //            predictionTxt <<"Rotation matrix (Shoulder = R*Base):\n"
+                //                          << SM.RotationBaseShoulder<<'\n';
+                //            predictionTxt <<"Rotate angles XYZ (Shoulder = R*Base):\n"
+                //                          << SM.angles_ShoulderBase.transpose()<<'\n';
+//                predictionTxt << "Rotation matrix (Shoulder = R*Shoulder0):\n"
+//                              << SM.RShoulderF0F1(0, 0) << " " << SM.RShoulderF0F1(0, 1) << " "
+//                              << SM.RShoulderF0F1(0, 2) << '\n'
+//                              << SM.RShoulderF0F1(1, 0) << " " << SM.RShoulderF0F1(1, 1) << " "
+//                              << SM.RShoulderF0F1(1, 2) << '\n'
+//                              << SM.RShoulderF0F1(2, 0) << " " << SM.RShoulderF0F1(2, 1) << " "
+//                              << SM.RShoulderF0F1(2, 2) << '\n';
+//                predictionTxt << "Rotate angles XYZ (Shoulder = R*Shoulder0):\n"
+//                              << SM.angles_f0f1.transpose() << '\n';
+                predictionTxt << "Rotation matrix (Shoulder = R*Shoulder0):\n"
+                              << SM.RotationBaseShoulder(0, 0) << " " << SM.RotationBaseShoulder(0, 1) << " "
+                              << SM.RotationBaseShoulder(0, 2) << '\n'
+                              << SM.RotationBaseShoulder(1, 0) << " " << SM.RotationBaseShoulder(1, 1) << " "
+                              << SM.RotationBaseShoulder(1, 2) << '\n'
+                              << SM.RotationBaseShoulder(2, 0) << " " << SM.RotationBaseShoulder(2, 1) << " "
+                              << SM.RotationBaseShoulder(2, 2) << '\n';
+                predictionTxt << "Rotate angles XYZ (Shoulder = R*Shoulder0):\n"
+                              << SM.angles_ShoulderBase.transpose() << '\n';
 
+
+                predictionTxt << "Flexion angle: " << SM.angleArm << '\n' << '\n';
+            }
             string saveDir = fs::path(FLAGS_saveDir) / "output/" ;
             if(!fs::exists(saveDir)){
                 fs::create_directories(saveDir);
