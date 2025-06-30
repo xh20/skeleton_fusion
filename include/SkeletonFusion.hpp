@@ -98,7 +98,7 @@ inline void OpWrapper::configureWrapper()
         const auto handDetector = op::flagsToDetector(FLAGS_hand_detector);
         // Enabling Google Logging
         const bool enableGoogleLogging = true;
-        const string modelFolder = "/home/geriatronics/openpose/models";
+        const string modelFolder = "/home/hao/Downloads/openpose/models";
         // Pose configuration (use WrapperStructPose{} for default and recommended configuration)
         const op::WrapperStructPose wrapperStructPose{
                 poseMode, netInputSize, FLAGS_net_resolution_dynamic, outputSize, keypointScaleMode, FLAGS_num_gpu,

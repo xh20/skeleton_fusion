@@ -14,7 +14,7 @@
 //#include <experimental/filesystem>
 #include <map>
 #include <eigen3/Eigen/Dense>
-#include <OsqpEigen/OsqpEigen.h>
+// #include <OsqpEigen/OsqpEigen.h>
 #include <librealsense2/rs.hpp>
 
 using namespace std;
@@ -27,7 +27,7 @@ DEFINE_string(video2, "/media/dataset/translation/S00V01A16O00T1/colorframes/out
               "Give the second video file path");
 DEFINE_bool(image, true, "is input as image");
 DEFINE_bool(demo, false, "is input as camera");
-DEFINE_bool(save_images, true, "save all images");
+DEFINE_bool(save_images, false, "save all images");
 
 
 // Tag size
@@ -39,19 +39,20 @@ DEFINE_bool(save_images, true, "save all images");
 //              "Give the first video file path");
 //DEFINE_string(depthDir2, "/media/dataset/translation/results_medical2/845112070795/depth/",
 //              "Give the second video file path");
-DEFINE_string(colorDir1, "/home/geriatronics/hao/skeleton_fusion/results_slow_push_front/213322071238/original/",  // results_dailytask results_medical
+DEFINE_string(colorDir1, "/mnt/data_base/skeleton_fusion/records/push_side/push_side_2/142122070979/original/",  // results_dailytask results_medical
               "Give the first video file path");
-DEFINE_string(colorDir2, "/home/geriatronics/hao/skeleton_fusion/results_slow_push_front/934222072657/original/", // results_test results_daily1
+DEFINE_string(colorDir2, "/mnt/data_base/skeleton_fusion/records/push_side/push_side_2/845112070795/original/", // results_test results_daily1
               "Give the second video file path");
-DEFINE_string(depthDir1, "/home/geriatronics/hao/skeleton_fusion/results_slow_push_front/213322071238/depth/",
+DEFINE_string(depthDir1, "/mnt/data_base/skeleton_fusion/records/push_side/push_side_2/142122070979/depth/",
               "Give the first video file path");
-DEFINE_string(depthDir2, "/home/geriatronics/hao/skeleton_fusion/results_slow_push_front/934222072657/depth/",
+DEFINE_string(depthDir2, "/mnt/data_base/skeleton_fusion/records/push_side/push_side_2/845112070795/depth2/",
               "Give the second video file path");
 
-
+DEFINE_string(cameraParameters, "/mnt/data_base/skeleton_fusion/records/push_side/push_side_2/cam_parameters.txt",
+              "Give the camera parameters text file path");
 DEFINE_string(tagCode, "36h11", "Give the tag code to choose tag family");
-DEFINE_int32(TagID, 89, "Give the Tag ID to calculate the extrinsic parameters, hand marker: 89, table left: 54, table right: 25");
-DEFINE_string(saveDir, "/home/geriatronics/hao/skeleton_fusion/results_slow_push_front/",
+DEFINE_int32(TagID, 29, "Give the Tag ID to calculate the extrinsic parameters, hand marker: 89, table left: 54, table right: 25");
+DEFINE_string(saveDir, "/mnt/data_base/skeleton_fusion/records/push_side/push_side_2/results/",
               "Give the save path");
 
 double standardRad(double t) {
@@ -140,11 +141,12 @@ public:
 // "845112070795", {915.888, 915.828, 631.489, 372.897}
 // "cam_1", {919.0277709960938, 0.0, 647.3279418945312, 0.0, 917.8308715820312, 368.21026611328125, 0.0, 0.0, 1.0}
 // "cam_2", {921.8261108398438, 0.0, 641.4801635742188, 0.0, 921.8929443359375, 375.79901123046875, 0.0, 0.0, 1.0}
+// 142122070979 605.05 605.233 425.866 236.747
+// 845112070795 610.592 610.552 418.326 248.598
 
 
-
-inline SkeletonMerger::SkeletonMerger():cx1(647.3279),cy1(368.2103),fx1(919.0278),fy1(917.8309),
-cx2(641.4802),cy2(375.7990),fx2(921.8261),fy2(921.8929), gotTrans(false),
+inline SkeletonMerger::SkeletonMerger():cx1(425.866),cy1(236.747),fx1(605.05),fy1(605.233),
+cx2(418.326),cy2(248.598),fx2(610.592),fy2(610.552), gotTrans(false),
 tagSize(0.1660),index(1), countTF(0), upperArmLength(0.0), lowerArmLength(0.0),
 angleArm(0.0), angleArmTorso(0.0), angleArmX(0.0), angleArmY(0.0){
     OW = new OpWrapper;
@@ -277,6 +279,7 @@ inline void SkeletonMerger::updateRT(){
 //        cout<<"K2\n"<<K2<<endl;
         MyFilledCircle(frame2, cv::Point(int(c2(0)),int(c2(1))),Scalar(0,0,255)); //red
     }
+
     if(detected1 && detected2) {
 //        R12 = m2*m1.transpose(); // cam1 -> cam2
 //        T12 = T2-m2*m1.transpose()*T1;
@@ -326,6 +329,7 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
                                        const bool* isDisplay) {
     *skDetected = false;
     setFrames(*f1, *f2, *fD1, *fD2);
+
 //    Matrix3d PEstimated, PETranslated, PixelEstimated;
     Vector3d PEstimated, PETranslated, PixelEstimated;
     if (!gotTrans) {
@@ -926,7 +930,7 @@ int main(int argc, char** argv){
             frameD1 = imread(depthDir1, -1);
             frameD2 = imread(depthDir2, -1);
             cout<<"frame: "<<index<<endl;
-            bool skDetected = false, isDisplay = false;
+            bool skDetected = false, isDisplay = true;
             SM.processing(&frame1, &frame2, &frameD1, &frameD2, &skDetected, &isDisplay);
             if(!skDetected)
                 continue;
@@ -948,6 +952,7 @@ int main(int argc, char** argv){
         }
     }
     else if(FLAGS_demo){
+        // real time camera
         context ctx;
         int WIDTH = 848, HEIGHT = 480;
         fs::path saveDir = FLAGS_saveDir;
@@ -1099,7 +1104,7 @@ int main(int argc, char** argv){
         }
     }
     else{
-        ifstream camParametersTxt(fs::path(FLAGS_saveDir)/"cam_parameters.txt");
+        ifstream camParametersTxt(FLAGS_cameraParameters);
         vector<vector<string>> camsParametersVec;
         if (camParametersTxt.is_open())
         {
@@ -1138,6 +1143,7 @@ int main(int argc, char** argv){
         }
         cout<<"frameNumber: "<<frameNumber<<endl;
         predictionTxt<<"frameNumber: " << frameNumber<<'\n';
+        /* sort filenames
         std::sort(filenames.begin(), filenames.end(), [](const auto& lhs, const auto& rhs)
         {
             string lhs_ = lhs.string();
@@ -1148,10 +1154,11 @@ int main(int argc, char** argv){
             return stoi(lhsn) < stoi(rhsn);
 //            return lhs.string() < rhs.string();
         });
-        for (const auto& file : filenames) {
-            string img = file.string();
-            string imgD = img;
-            imgD.replace(imgD.find("color"), sizeof("color") - 1, "depth");
+        */
+
+        for (int frameIndex=0; frameIndex<frameNumber; frameIndex++) {
+            string img = format("color_%d.png", frameIndex);
+            string imgD = format("depth_%d.png", frameIndex);
             cout<<"img: "<<img<<endl;
             cout<<"imgD: "<<imgD<<endl;
             string imgDir1 = FLAGS_colorDir1 + img;
@@ -1164,8 +1171,11 @@ int main(int argc, char** argv){
             frameD1 = imread(imgDepthDir1, -1);
             frameD2 = imread(imgDepthDir2, -1);
 
-            if (frame2.empty() || frame1.empty() || frameD2.empty() || frameD1.empty())
+            if (frame2.empty() || frame1.empty() || frameD2.empty() || frameD1.empty()) {
+                cout<<"Couldn't read images"<<endl;
                 break;
+            }
+
             bool skDetected = false, isDisplay=true;
             SM.processing(&frame1, &frame2, &frameD1, &frameD2, &skDetected, &isDisplay);
             Mat colorResult;
@@ -1259,10 +1269,10 @@ int main(int argc, char** argv){
 //    plt::named_hist("Constrain length L_ew", constrain1);
 //    plt::show();
 //    plt::close();
-//    plt::plot(angles_x);
-//    plt::plot(angles_y);
-//    plt::plot(angles_z);
-//    plt::show();
+    // plt::plot(angles_x);
+    // plt::plot(angles_y);
+    // plt::plot(angles_z);
+    // plt::show();
 //    if(!FLAGS_demo){
 //        vector<double> constrain1 (frameNumber, constrainLength1);
 //        plt::named_hist("Constrain length L_ew", constrain1);

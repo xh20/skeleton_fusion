@@ -123,6 +123,7 @@ inline void TagDetector::isDetected(const int* detectionID, const Mat* matImg, b
         zarray_get(detections, i, &detTemp);
         if(detTemp->id!=ID)
         {
+            cout<<"detected a different ID: "<<detTemp->id<<endl;
             continue;
         }
         *isTagdetected = true;
