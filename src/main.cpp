@@ -575,6 +575,9 @@ inline void SkeletonMerger::processing(Mat *f1, Mat *f2, const Mat *fD1, const M
 //    thetaY = 180/M_PI*atan2(-RotationBaseShoulder(2,0),
 //                            sqrt(pow(RotationBaseShoulder(2,1),2) + pow(RotationBaseShoulder(2,2),2)));
 //    thetaZ = 180/M_PI*atan2(RotationBaseShoulder(1,0), RotationBaseShoulder(0,0));
+// 0, 1, 2 -> rotation along x, y, z
+// 1, 0, 2 -> yxz
+
     angles_ShoulderBase = 180/M_PI*Matrix3d(RotationBaseShoulder).eulerAngles(0, 1, 2);
 //    if(countTF < 1){
 //        angles_SB_old = angles_ShoulderBase;
